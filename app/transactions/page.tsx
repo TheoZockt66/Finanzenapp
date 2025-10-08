@@ -20,11 +20,19 @@ import {
   Collapse,
   Divider,
   Box,
-  Modal
+  Modal,
+  SimpleGrid,
+  Flex,
+  ScrollArea,
+  Anchor,
+  Avatar,
+  Menu,
+  rem
 } from '@mantine/core';
 import { DatePickerInput, DateInput } from '@mantine/dates';
-import { IconPlus, IconTrash, IconEdit, IconFilter, IconFilterOff, IconSearch } from '@tabler/icons-react';
-import { useDisclosure } from '@mantine/hooks';
+import { IconPlus, IconTrash, IconEdit, IconFilter, IconFilterOff, IconSearch, IconDotsVertical, IconTrendingUp, IconTrendingDown, IconCalendar, IconReceipt, IconSwipeLeft } from '@tabler/icons-react';
+import { useDisclosure, useMediaQuery } from '@mantine/hooks';
+import { notifications } from '@mantine/notifications';
 import dayjs from 'dayjs';
 import 'dayjs/locale/de';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
@@ -75,6 +83,8 @@ interface FilterState {
 }
 
 export default function TransactionsPage() {
+  const isMobile = useMediaQuery('(max-width: 768px)');
+  
   // Budget State - synchronisiert mit Budget-Seite
   const [budgets, setBudgets] = useState<BudgetItem[]>([
     { 
@@ -294,7 +304,110 @@ export default function TransactionsPage() {
       updateBudgetSpent(transaction.budget, -transaction.betrag);
     }
     setTransactions(transactions.filter(t => t.id !== id));
+    
+    notifications.show({
+      title: 'Transaktion gelöscht',
+      message: 'Die Transaktion wurde erfolgreich entfernt.',
+      color: 'green',
+    });
   };
+
+  // Mobile Transaction Card Component
+  const MobileTransactionCard = ({ transaction }: { transaction: Transaction }) => (
+    <Card
+      padding="md"
+      radius="md"
+      withBorder
+      style={{
+        transition: 'all 0.2s ease',
+        cursor: 'pointer',
+      }}
+      onClick={() => openEditForm(transaction)}
+    >
+      <Stack gap="xs">
+        <Group justify="space-between" align="flex-start">
+          <Stack gap={4} style={{ flex: 1 }}>
+            <Group gap="xs">
+              <Badge 
+                color={transaction.typ === 'Einnahme' ? 'green' : 'red'} 
+                variant="light"
+                size="sm"
+                leftSection={
+                  transaction.typ === 'Einnahme' ? 
+                  <IconTrendingUp size={12} /> : 
+                  <IconTrendingDown size={12} />
+                }
+              >
+                {transaction.typ}
+              </Badge>
+              <Badge 
+                color={getCategoryColor(transaction.kategorie)} 
+                variant="dot"
+                size="sm"
+              >
+                {transaction.kategorie}
+              </Badge>
+            </Group>
+            <Text fw={500} size="sm" lineClamp={2}>
+              {transaction.beschreibung}
+            </Text>
+            <Group gap="xs">
+              <IconCalendar size={14} style={{ opacity: 0.6 }} />
+              <Text size="xs" c="dimmed">
+                {dayjs(transaction.datum).format('DD.MM.YYYY')}
+              </Text>
+              <Text size="xs" c="dimmed">•</Text>
+              <Text size="xs" c="dimmed">
+                {transaction.budget}
+              </Text>
+            </Group>
+          </Stack>
+          
+          <Stack gap="xs" align="flex-end">
+            <Text 
+              fw={700} 
+              size="lg"
+              c={transaction.typ === 'Einnahme' ? 'green' : 'red'}
+            >
+              {transaction.typ === 'Einnahme' ? '+' : '-'}€{transaction.betrag.toFixed(2)}
+            </Text>
+            <Menu position="bottom-end" withinPortal>
+              <Menu.Target>
+                <ActionIcon 
+                  variant="subtle" 
+                  size="sm"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <IconDotsVertical size={16} />
+                </ActionIcon>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Item 
+                  leftSection={<IconEdit size={14} />}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openEditForm(transaction);
+                  }}
+                >
+                  Bearbeiten
+                </Menu.Item>
+                <Menu.Item 
+                  leftSection={<IconTrash size={14} />}
+                  color="red"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteTransaction(transaction.id);
+                  }}
+                >
+                  Löschen
+                </Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
+          </Stack>
+        </Group>
+      </Stack>
+    </Card>
+  );
 
   // Statistiken
   const totalEinnahmen = filteredTransactions
@@ -310,32 +423,39 @@ export default function TransactionsPage() {
   return (
     <Container size="xl" py="md">
       <Stack gap="lg">
-        <Group justify="space-between" align="center">
-          <Title order={1}>Transaktionen</Title>
-          <Button leftSection={<IconPlus size={16} />} onClick={openAddForm}>
-            Neue Transaktion
-          </Button>
-        </Group>
+        <Flex justify="space-between" align="center" gap="md" wrap="wrap">
+          <Title order={1} size={isMobile ? "h2" : "h1"}>Transaktionen</Title>
+          {!isMobile && (
+            <Button 
+              leftSection={<IconPlus size={16} />} 
+              onClick={openAddForm}
+              size="sm"
+            >
+              Neue Transaktion
+            </Button>
+          )}
+        </Flex>
 
         {/* Filter-Bereich */}
-        <Paper p="md" withBorder>
+        <Paper p={isMobile ? "sm" : "md"} withBorder>
           <Group justify="space-between" align="center" mb={filtersOpened ? "md" : 0}>
             <Group>
               <IconFilter size={20} />
-              <Text fw={500}>Filter</Text>
+              <Text fw={500} size={isMobile ? "sm" : "md"}>Filter</Text>
               {hasActiveFilters() && (
                 <Badge color="blue" size="sm">
-                  {Object.values(filters).filter(v => v !== '' && v !== null && v !== undefined).length} aktiv
+                  {Object.values(filters).filter(v => v !== '' && v !== null && v !== undefined).length}
                 </Badge>
               )}
             </Group>
-            <Group>
+            <Group gap={isMobile ? "xs" : "sm"}>
               <Button 
                 variant="light" 
                 leftSection={<IconFilter size={16} />}
                 onClick={toggleFilters}
+                size={isMobile ? "xs" : "sm"}
               >
-                {filtersOpened ? 'Filter ausblenden' : 'Filter anzeigen'}
+                {filtersOpened ? 'Ausblenden' : 'Filter'}
               </Button>
               {hasActiveFilters() && (
                 <Button 
@@ -343,8 +463,9 @@ export default function TransactionsPage() {
                   color="red"
                   leftSection={<IconFilterOff size={16} />}
                   onClick={clearFilters}
+                  size={isMobile ? "xs" : "sm"}
                 >
-                  Zuruecksetzen
+                  {isMobile ? 'Reset' : 'Zurücksetzen'}
                 </Button>
               )}
             </Group>
@@ -352,40 +473,40 @@ export default function TransactionsPage() {
 
           <Collapse in={filtersOpened}>
             <Divider mb="md" />
-            <Grid>
-              <Grid.Col span={{ base: 12, md: 4 }}>
+            {isMobile ? (
+              // Mobile Filter Layout
+              <Stack gap="md">
                 <TextInput
                   label="Suchtext"
                   placeholder="Beschreibung durchsuchen..."
                   leftSection={<IconSearch size={16} />}
                   value={filters.searchText}
                   onChange={(e) => setFilters(prev => ({ ...prev, searchText: e.target.value }))}
+                  size="md"
                 />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 4 }}>
-                <Select
-                  label="Typ"
-                  placeholder="Alle Typen"
-                  data={[
-                    { value: 'Einnahme', label: 'Einnahme' },
-                    { value: 'Ausgabe', label: 'Ausgabe' }
-                  ]}
-                  value={filters.typ}
-                  onChange={(value) => setFilters(prev => ({ ...prev, typ: value || '' }))}
-                  clearable
-                />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 4 }}>
-                <Select
-                  label="Kategorie"
-                  placeholder="Alle Kategorien"
-                  data={kategorieOptions}
-                  value={filters.kategorie}
-                  onChange={(value) => setFilters(prev => ({ ...prev, kategorie: value || '' }))}
-                  clearable
-                />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 4 }}>
+                <SimpleGrid cols={2} spacing="md">
+                  <Select
+                    label="Typ"
+                    placeholder="Alle"
+                    data={[
+                      { value: 'Einnahme', label: 'Einnahme' },
+                      { value: 'Ausgabe', label: 'Ausgabe' }
+                    ]}
+                    value={filters.typ}
+                    onChange={(value) => setFilters(prev => ({ ...prev, typ: value || '' }))}
+                    clearable
+                    size="md"
+                  />
+                  <Select
+                    label="Kategorie"
+                    placeholder="Alle"
+                    data={kategorieOptions}
+                    value={filters.kategorie}
+                    onChange={(value) => setFilters(prev => ({ ...prev, kategorie: value || '' }))}
+                    clearable
+                    size="md"
+                  />
+                </SimpleGrid>
                 <Select
                   label="Budget"
                   placeholder="Alle Budgets"
@@ -393,89 +514,170 @@ export default function TransactionsPage() {
                   value={filters.budget}
                   onChange={(value) => setFilters(prev => ({ ...prev, budget: value || '' }))}
                   clearable
+                  size="md"
                 />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 4 }}>
-                <DatePickerInput
-                  label="Von Datum"
-                  placeholder="Startdatum wählen"
-                  value={filters.dateFrom}
-                  onChange={(value) => setFilters(prev => ({ ...prev, dateFrom: value }))}
-                  valueFormat="DD.MM.YYYY"
-                  locale="de"
-                  firstDayOfWeek={1}
-                  clearable
-                />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 4 }}>
-                <DatePickerInput
-                  label="Bis Datum"
-                  placeholder="Enddatum wählen"
-                  value={filters.dateTo}
-                  onChange={(value) => setFilters(prev => ({ ...prev, dateTo: value }))}
-                  valueFormat="DD.MM.YYYY"
-                  locale="de"
-                  firstDayOfWeek={1}
-                  clearable
-                />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 3 }}>
-                <NumberInput
-                  label="Min. Betrag"
-                  placeholder="0,00"
-                  decimalScale={2}
-                  fixedDecimalScale
-                  prefix="EUR "
-                  value={filters.minBetrag}
-                  onChange={(value) => setFilters(prev => ({ ...prev, minBetrag: typeof value === 'number' ? value : undefined }))}
-                />
-              </Grid.Col>
-              <Grid.Col span={{ base: 12, md: 3 }}>
-                <NumberInput
-                  label="Max. Betrag"
-                  placeholder="1000,00"
-                  decimalScale={2}
-                  fixedDecimalScale
-                  prefix="EUR "
-                  value={filters.maxBetrag}
-                  onChange={(value) => setFilters(prev => ({ ...prev, maxBetrag: typeof value === 'number' ? value : undefined }))}
-                />
-              </Grid.Col>
-            </Grid>
+                <SimpleGrid cols={2} spacing="md">
+                  <DatePickerInput
+                    label="Von"
+                    placeholder="Startdatum"
+                    value={filters.dateFrom}
+                    onChange={(value) => setFilters(prev => ({ ...prev, dateFrom: value }))}
+                    valueFormat="DD.MM.YY"
+                    locale="de"
+                    firstDayOfWeek={1}
+                    clearable
+                    size="md"
+                  />
+                  <DatePickerInput
+                    label="Bis"
+                    placeholder="Enddatum"
+                    value={filters.dateTo}
+                    onChange={(value) => setFilters(prev => ({ ...prev, dateTo: value }))}
+                    valueFormat="DD.MM.YY"
+                    locale="de"
+                    firstDayOfWeek={1}
+                    clearable
+                    size="md"
+                  />
+                </SimpleGrid>
+              </Stack>
+            ) : (
+              // Desktop Filter Layout
+              <Grid>
+                <Grid.Col span={{ base: 12, md: 4 }}>
+                  <TextInput
+                    label="Suchtext"
+                    placeholder="Beschreibung durchsuchen..."
+                    leftSection={<IconSearch size={16} />}
+                    value={filters.searchText}
+                    onChange={(e) => setFilters(prev => ({ ...prev, searchText: e.target.value }))}
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, md: 4 }}>
+                  <Select
+                    label="Typ"
+                    placeholder="Alle Typen"
+                    data={[
+                      { value: 'Einnahme', label: 'Einnahme' },
+                      { value: 'Ausgabe', label: 'Ausgabe' }
+                    ]}
+                    value={filters.typ}
+                    onChange={(value) => setFilters(prev => ({ ...prev, typ: value || '' }))}
+                    clearable
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, md: 4 }}>
+                  <Select
+                    label="Kategorie"
+                    placeholder="Alle Kategorien"
+                    data={kategorieOptions}
+                    value={filters.kategorie}
+                    onChange={(value) => setFilters(prev => ({ ...prev, kategorie: value || '' }))}
+                    clearable
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, md: 4 }}>
+                  <Select
+                    label="Budget"
+                    placeholder="Alle Budgets"
+                    data={budgets.map(b => ({ value: b.name, label: b.name }))}
+                    value={filters.budget}
+                    onChange={(value) => setFilters(prev => ({ ...prev, budget: value || '' }))}
+                    clearable
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, md: 4 }}>
+                  <DatePickerInput
+                    label="Von Datum"
+                    placeholder="Startdatum wählen"
+                    value={filters.dateFrom}
+                    onChange={(value) => setFilters(prev => ({ ...prev, dateFrom: value }))}
+                    valueFormat="DD.MM.YYYY"
+                    locale="de"
+                    firstDayOfWeek={1}
+                    clearable
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, md: 4 }}>
+                  <DatePickerInput
+                    label="Bis Datum"
+                    placeholder="Enddatum wählen"
+                    value={filters.dateTo}
+                    onChange={(value) => setFilters(prev => ({ ...prev, dateTo: value }))}
+                    valueFormat="DD.MM.YYYY"
+                    locale="de"
+                    firstDayOfWeek={1}
+                    clearable
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, md: 3 }}>
+                  <NumberInput
+                    label="Min. Betrag"
+                    placeholder="0,00"
+                    decimalScale={2}
+                    fixedDecimalScale
+                    prefix="€"
+                    value={filters.minBetrag}
+                    onChange={(value) => setFilters(prev => ({ ...prev, minBetrag: typeof value === 'number' ? value : undefined }))}
+                  />
+                </Grid.Col>
+                <Grid.Col span={{ base: 12, md: 3 }}>
+                  <NumberInput
+                    label="Max. Betrag"
+                    placeholder="1000,00"
+                    decimalScale={2}
+                    fixedDecimalScale
+                    prefix="€"
+                    value={filters.maxBetrag}
+                    onChange={(value) => setFilters(prev => ({ ...prev, maxBetrag: typeof value === 'number' ? value : undefined }))}
+                  />
+                </Grid.Col>
+              </Grid>
+            )}
           </Collapse>
         </Paper>
 
         {/* Statistik-Karten */}
-        <Grid>
-          <Grid.Col span={{ base: 12, md: 3 }}>
-            <Card padding="lg" withBorder>
-              <Text size="sm" c="dimmed" mb={5}>Gesamte Einnahmen</Text>
-              <Text size="xl" fw={700} c="green">EUR {totalEinnahmen.toFixed(2)}</Text>
-            </Card>
-          </Grid.Col>
-          <Grid.Col span={{ base: 12, md: 3 }}>
-            <Card padding="lg" withBorder>
-              <Text size="sm" c="dimmed" mb={5}>Gesamte Ausgaben</Text>
-              <Text size="xl" fw={700} c="red">EUR {totalAusgaben.toFixed(2)}</Text>
-            </Card>
-          </Grid.Col>
-          <Grid.Col span={{ base: 12, md: 3 }}>
-            <Card padding="lg" withBorder>
-              <Text size="sm" c="dimmed" mb={5}>Saldo</Text>
-              <Text size="xl" fw={700} c={saldo >= 0 ? 'green' : 'red'}>
-                EUR {saldo.toFixed(2)}
+        <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md">
+          <Card padding="lg" withBorder>
+            <Stack gap={4} align="center">
+              <IconTrendingUp size={24} style={{ color: 'var(--mantine-color-green-6)' }} />
+              <Text size="xs" c="dimmed" ta="center">Einnahmen</Text>
+              <Text size={isMobile ? "lg" : "xl"} fw={700} c="green" ta="center">
+                €{totalEinnahmen.toFixed(2)}
               </Text>
-            </Card>
-          </Grid.Col>
-          <Grid.Col span={{ base: 12, md: 3 }}>
-            <Card padding="lg" withBorder>
-              <Text size="sm" c="dimmed" mb={5}>Anzahl Transaktionen</Text>
-              <Text size="xl" fw={700}>{filteredTransactions.length}</Text>
-            </Card>
-          </Grid.Col>
-        </Grid>
+            </Stack>
+          </Card>
+          <Card padding="lg" withBorder>
+            <Stack gap={4} align="center">
+              <IconTrendingDown size={24} style={{ color: 'var(--mantine-color-red-6)' }} />
+              <Text size="xs" c="dimmed" ta="center">Ausgaben</Text>
+              <Text size={isMobile ? "lg" : "xl"} fw={700} c="red" ta="center">
+                €{totalAusgaben.toFixed(2)}
+              </Text>
+            </Stack>
+          </Card>
+          <Card padding="lg" withBorder>
+            <Stack gap={4} align="center">
+              <IconReceipt size={24} style={{ color: saldo >= 0 ? 'var(--mantine-color-green-6)' : 'var(--mantine-color-red-6)' }} />
+              <Text size="xs" c="dimmed" ta="center">Saldo</Text>
+              <Text size={isMobile ? "lg" : "xl"} fw={700} c={saldo >= 0 ? 'green' : 'red'} ta="center">
+                €{saldo.toFixed(2)}
+              </Text>
+            </Stack>
+          </Card>
+          <Card padding="lg" withBorder>
+            <Stack gap={4} align="center">
+              <IconCalendar size={24} style={{ color: 'var(--mantine-color-blue-6)' }} />
+              <Text size="xs" c="dimmed" ta="center">Anzahl</Text>
+              <Text size={isMobile ? "lg" : "xl"} fw={700} ta="center">
+                {filteredTransactions.length}
+              </Text>
+            </Stack>
+          </Card>
+        </SimpleGrid>
 
-        {/* Transaktions-Tabelle */}
+        {/* Transaktions-Anzeige */}
         <Paper withBorder>
           <Box p="md">
             <Group justify="space-between" align="center" mb="md">
@@ -490,84 +692,115 @@ export default function TransactionsPage() {
             </Group>
             
             {filteredTransactions.length === 0 ? (
-              <Text ta="center" c="dimmed" py="xl">
-                {hasActiveFilters() ? 'Keine Transaktionen gefunden, die den Filterkriterien entsprechen.' : 'Noch keine Transaktionen vorhanden.'}
-              </Text>
+              <Stack align="center" py="xl" gap="md">
+                <IconReceipt size={48} style={{ opacity: 0.3 }} />
+                <Text ta="center" c="dimmed">
+                  {hasActiveFilters() ? 'Keine Transaktionen gefunden, die den Filterkriterien entsprechen.' : 'Noch keine Transaktionen vorhanden.'}
+                </Text>
+                {!hasActiveFilters() && (
+                  <Button leftSection={<IconPlus size={16} />} onClick={openAddForm}>
+                    Erste Transaktion hinzufügen
+                  </Button>
+                )}
+              </Stack>
             ) : (
-              <Table striped highlightOnHover>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>Datum</Table.Th>
-                    <Table.Th>Typ</Table.Th>
-                    <Table.Th>Kategorie</Table.Th>
-                    <Table.Th>Budget</Table.Th>
-                    <Table.Th>Beschreibung</Table.Th>
-                    <Table.Th>Betrag</Table.Th>
-                    <Table.Th>Aktionen</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {filteredTransactions.map((transaction) => (
-                    <Table.Tr key={transaction.id}>
-                      <Table.Td>
-                        {dayjs(transaction.datum).format('DD.MM.YYYY')}
-                      </Table.Td>
-                      <Table.Td>
-                        <Badge 
-                          color={transaction.typ === 'Einnahme' ? 'green' : 'red'} 
-                          variant="light"
-                        >
-                          {transaction.typ}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td>
-                        <Badge 
-                          color={getCategoryColor(transaction.kategorie)} 
-                          variant="light"
-                        >
-                          {transaction.kategorie}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td>
-                        <Badge 
-                          color={getBudgetInfo(transaction.budget)?.farbe || 'gray'} 
-                          variant="outline"
-                        >
-                          {transaction.budget}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td>{transaction.beschreibung}</Table.Td>
-                      <Table.Td>
-                        <Text 
-                          fw={500} 
-                          c={transaction.typ === 'Einnahme' ? 'green' : 'red'}
-                        >
-                          {transaction.typ === 'Einnahme' ? '+' : '-'}EUR {transaction.betrag.toFixed(2)}
+              <>
+                {/* Mobile View */}
+                {isMobile ? (
+                  <Stack gap="sm">
+                    {filteredTransactions.map((transaction) => (
+                      <MobileTransactionCard key={transaction.id} transaction={transaction} />
+                    ))}
+                    {filteredTransactions.length > 10 && (
+                      <Group justify="center" mt="md">
+                        <Text size="sm" c="dimmed">
+                          {filteredTransactions.length} Transaktionen angezeigt
                         </Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Group gap="xs">
-                          <ActionIcon 
-                            variant="light" 
-                            size="sm"
-                            onClick={() => openEditForm(transaction)}
-                          >
-                            <IconEdit size={14} />
-                          </ActionIcon>
-                          <ActionIcon 
-                            variant="light" 
-                            color="red" 
-                            size="sm"
-                            onClick={() => handleDeleteTransaction(transaction.id)}
-                          >
-                            <IconTrash size={14} />
-                          </ActionIcon>
-                        </Group>
-                      </Table.Td>
-                    </Table.Tr>
-                  ))}
-                </Table.Tbody>
-              </Table>
+                      </Group>
+                    )}
+                  </Stack>
+                ) : (
+                  /* Desktop Table View */
+                  <ScrollArea>
+                    <Table striped highlightOnHover>
+                      <Table.Thead>
+                        <Table.Tr>
+                          <Table.Th>Datum</Table.Th>
+                          <Table.Th>Typ</Table.Th>
+                          <Table.Th>Kategorie</Table.Th>
+                          <Table.Th>Budget</Table.Th>
+                          <Table.Th>Beschreibung</Table.Th>
+                          <Table.Th>Betrag</Table.Th>
+                          <Table.Th>Aktionen</Table.Th>
+                        </Table.Tr>
+                      </Table.Thead>
+                      <Table.Tbody>
+                        {filteredTransactions.map((transaction) => (
+                          <Table.Tr key={transaction.id}>
+                            <Table.Td>
+                              {dayjs(transaction.datum).format('DD.MM.YYYY')}
+                            </Table.Td>
+                            <Table.Td>
+                              <Badge 
+                                color={transaction.typ === 'Einnahme' ? 'green' : 'red'} 
+                                variant="light"
+                              >
+                                {transaction.typ}
+                              </Badge>
+                            </Table.Td>
+                            <Table.Td>
+                              <Badge 
+                                color={getCategoryColor(transaction.kategorie)} 
+                                variant="light"
+                              >
+                                {transaction.kategorie}
+                              </Badge>
+                            </Table.Td>
+                            <Table.Td>
+                              <Badge 
+                                color={getBudgetInfo(transaction.budget)?.farbe || 'gray'} 
+                                variant="outline"
+                              >
+                                {transaction.budget}
+                              </Badge>
+                            </Table.Td>
+                            <Table.Td>
+                              <Text lineClamp={2}>{transaction.beschreibung}</Text>
+                            </Table.Td>
+                            <Table.Td>
+                              <Text 
+                                fw={500} 
+                                c={transaction.typ === 'Einnahme' ? 'green' : 'red'}
+                              >
+                                {transaction.typ === 'Einnahme' ? '+' : '-'}€{transaction.betrag.toFixed(2)}
+                              </Text>
+                            </Table.Td>
+                            <Table.Td>
+                              <Group gap="xs">
+                                <ActionIcon 
+                                  variant="light" 
+                                  size="sm"
+                                  onClick={() => openEditForm(transaction)}
+                                >
+                                  <IconEdit size={14} />
+                                </ActionIcon>
+                                <ActionIcon 
+                                  variant="light" 
+                                  color="red" 
+                                  size="sm"
+                                  onClick={() => handleDeleteTransaction(transaction.id)}
+                                >
+                                  <IconTrash size={14} />
+                                </ActionIcon>
+                              </Group>
+                            </Table.Td>
+                          </Table.Tr>
+                        ))}
+                      </Table.Tbody>
+                    </Table>
+                  </ScrollArea>
+                )}
+              </>
             )}
           </Box>
         </Paper>
@@ -577,49 +810,71 @@ export default function TransactionsPage() {
           opened={opened}
           onClose={close}
           title={editingTransaction ? 'Transaktion bearbeiten' : 'Neue Transaktion'}
-          size="md"
+          size={isMobile ? "100%" : "md"}
+          fullScreen={isMobile}
+          styles={{
+            header: {
+              paddingBottom: rem(10),
+            },
+            title: {
+              fontWeight: 700,
+              fontSize: rem(18),
+            }
+          }}
         >
-          <Stack gap="md">
-            <Select
-              label="Typ"
-              placeholder="Typ auswaehlen"
-              data={[
-                { value: 'Einnahme', label: 'Einnahme' },
-                { value: 'Ausgabe', label: 'Ausgabe' }
-              ]}
-              value={formData.typ}
-              onChange={(value) => setFormData(prev => ({ ...prev, typ: value as 'Einnahme' | 'Ausgabe' }))}
-              required
-            />
+          <Stack gap={isMobile ? "lg" : "md"}>
+            <SimpleGrid cols={isMobile ? 1 : 2} spacing="md">
+              <Select
+                label="Typ"
+                placeholder="Typ auswählen"
+                data={[
+                  { value: 'Einnahme', label: '💰 Einnahme' },
+                  { value: 'Ausgabe', label: '💸 Ausgabe' }
+                ]}
+                value={formData.typ}
+                onChange={(value) => setFormData(prev => ({ ...prev, typ: value as 'Einnahme' | 'Ausgabe' }))}
+                required
+                size={isMobile ? "md" : "sm"}
+              />
+
+              <NumberInput
+                label="Betrag"
+                placeholder="0,00"
+                decimalScale={2}
+                fixedDecimalScale
+                prefix="€"
+                value={formData.betrag}
+                onChange={(value) => setFormData(prev => ({ ...prev, betrag: typeof value === 'number' ? value : 0 }))}
+                required
+                min={0.01}
+                size={isMobile ? "md" : "sm"}
+              />
+            </SimpleGrid>
 
             <Select
               label="Kategorie"
-              placeholder="Kategorie auswaehlen"
-              data={kategorieOptions}
+              placeholder="Kategorie auswählen"
+              data={kategorieOptions.map(cat => ({ 
+                ...cat, 
+                label: `${cat.label}` 
+              }))}
               value={formData.kategorie}
               onChange={(value) => setFormData(prev => ({ ...prev, kategorie: value || '' }))}
               required
+              size={isMobile ? "md" : "sm"}
             />
 
             <Select
               label="Budget"
-              placeholder="Budget auswaehlen"
-              data={budgets.map(b => ({ value: b.name, label: b.name }))}
+              placeholder="Budget auswählen"
+              data={budgets.map(b => ({ 
+                value: b.name, 
+                label: `${b.name} (${(b.betrag - b.ausgegeben).toFixed(0)}€ verfügbar)` 
+              }))}
               value={formData.budget}
               onChange={(value) => setFormData(prev => ({ ...prev, budget: value || '' }))}
               required
-            />
-
-            <NumberInput
-              label="Betrag"
-              placeholder="0,00"
-              decimalScale={2}
-              fixedDecimalScale
-              prefix="EUR "
-              value={formData.betrag}
-              onChange={(value) => setFormData(prev => ({ ...prev, betrag: typeof value === 'number' ? value : 0 }))}
-              required
-              min={0.01}
+              size={isMobile ? "md" : "sm"}
             />
 
             <TextInput
@@ -628,6 +883,7 @@ export default function TransactionsPage() {
               value={formData.beschreibung}
               onChange={(e) => setFormData(prev => ({ ...prev, beschreibung: e.target.value }))}
               required
+              size={isMobile ? "md" : "sm"}
             />
 
             <DateInput
@@ -640,19 +896,49 @@ export default function TransactionsPage() {
               firstDayOfWeek={1}
               clearable
               required
+              size={isMobile ? "md" : "sm"}
             />
 
-            <Group justify="flex-end" mt="md">
-              <Button variant="outline" onClick={close}>
+            <Group justify="flex-end" mt="md" gap={isMobile ? "md" : "sm"}>
+              <Button 
+                variant="outline" 
+                onClick={close}
+                size={isMobile ? "md" : "sm"}
+                style={{ flex: isMobile ? 1 : 'none' }}
+              >
                 Abbrechen
               </Button>
-              <Button onClick={handleSubmit}>
-                {editingTransaction ? 'Aktualisieren' : 'Hinzufuegen'}
+              <Button 
+                onClick={handleSubmit}
+                size={isMobile ? "md" : "sm"}
+                style={{ flex: isMobile ? 1 : 'none' }}
+              >
+                {editingTransaction ? 'Aktualisieren' : 'Hinzufügen'}
               </Button>
             </Group>
           </Stack>
         </Modal>
       </Stack>
+
+      {/* Floating Action Button for Mobile */}
+      {isMobile && (
+        <ActionIcon
+          size={56}
+          radius="xl"
+          variant="filled"
+          color="blue"
+          style={{
+            position: 'fixed',
+            bottom: '20px',
+            right: '20px',
+            zIndex: 1000,
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+          }}
+          onClick={openAddForm}
+        >
+          <IconPlus size={24} />
+        </ActionIcon>
+      )}
     </Container>
   );
 }
