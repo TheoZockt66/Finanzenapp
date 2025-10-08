@@ -270,39 +270,56 @@ export default function CostsPage() {
           </Group>
         </Group>
 
+        <Group justify="space-between" align="center" mb="md">
+          <Group>
+            <Title order={2}>Kostenpläne</Title>
+            {costPlans.length > 1 && (
+              <Badge variant="light" color="blue">
+                {costPlans.length} Pläne
+              </Badge>
+            )}
+          </Group>
+          <Group gap="xs">
+            <Button 
+              leftSection={<IconPlus size={16} />} 
+              onClick={handleAddCategory}
+              size="sm"
+            >
+              Neue Kategorie
+            </Button>
+            {costPlans.length > 1 && activePlanId && (
+              <>
+                <ActionIcon
+                  size="lg"
+                  variant="subtle"
+                  color="blue"
+                  onClick={() => {
+                    const activePlan = costPlans.find(p => p.id === activePlanId);
+                    if (activePlan) handleEditPlan(activePlan);
+                  }}
+                  title="Plan bearbeiten"
+                >
+                  <IconEdit size={18} />
+                </ActionIcon>
+                <ActionIcon
+                  size="lg"
+                  variant="subtle"
+                  color="red"
+                  onClick={() => handleDeletePlan(activePlanId)}
+                  title="Plan löschen"
+                >
+                  <IconTrash size={18} />
+                </ActionIcon>
+              </>
+            )}
+          </Group>
+        </Group>
+
         <Tabs value={activePlanId} onChange={(value) => setActivePlanId(value || '1')}>
-          <Tabs.List>
+          <Tabs.List mb="lg">
             {costPlans.map((plan) => (
               <Tabs.Tab key={plan.id} value={plan.id}>
-                <Group gap="xs">
-                  <Text>{plan.name}</Text>
-                  {costPlans.length > 1 && (
-                    <Group gap={4}>
-                      <ActionIcon
-                        size="xs"
-                        variant="subtle"
-                        color="blue"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleEditPlan(plan);
-                        }}
-                      >
-                        <IconEdit size={12} />
-                      </ActionIcon>
-                      <ActionIcon
-                        size="xs"
-                        variant="subtle"
-                        color="red"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeletePlan(plan.id);
-                        }}
-                      >
-                        <IconTrash size={12} />
-                      </ActionIcon>
-                    </Group>
-                  )}
-                </Group>
+                {plan.name}
               </Tabs.Tab>
             ))}
           </Tabs.List>
