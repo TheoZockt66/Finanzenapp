@@ -1,4 +1,4 @@
-import { Container, Title, Text, Card, Group, Stack } from '@mantine/core';
+import { Container, Title, Text, Card, Group, Stack, SimpleGrid } from '@mantine/core';
 import { IconWallet, IconTrendingUp, IconCalendar, IconSettings } from '@tabler/icons-react';
 
 export default function HomePage() {
@@ -12,10 +12,20 @@ export default function HomePage() {
           </Text>
         </div>
 
-        <Group grow>
-          <Card shadow="sm" padding="lg" radius="md" withBorder>
+        <SimpleGrid 
+          cols={{ base: 1, xs: 2, md: 4 }} 
+          spacing="md"
+          verticalSpacing="md"
+        >
+          <Card 
+            shadow="sm" 
+            padding="lg" 
+            radius="md" 
+            withBorder
+            style={{ minHeight: '120px' }}
+          >
             <Group justify="space-between" mb="xs">
-              <Text fw={500}>Gesamtvermögen</Text>
+              <Text fw={500} size="sm">Gesamtvermögen</Text>
               <IconWallet size={24} />
             </Group>
             <Text size="xl" fw={700} c="green">
@@ -23,9 +33,15 @@ export default function HomePage() {
             </Text>
           </Card>
 
-          <Card shadow="sm" padding="lg" radius="md" withBorder>
+          <Card 
+            shadow="sm" 
+            padding="lg" 
+            radius="md" 
+            withBorder
+            style={{ minHeight: '120px' }}
+          >
             <Group justify="space-between" mb="xs">
-              <Text fw={500}>Monatliche Ausgaben</Text>
+              <Text fw={500} size="sm">Monatliche Ausgaben</Text>
               <IconTrendingUp size={24} />
             </Group>
             <Text size="xl" fw={700} c="red">
@@ -33,9 +49,15 @@ export default function HomePage() {
             </Text>
           </Card>
 
-          <Card shadow="sm" padding="lg" radius="md" withBorder>
+          <Card 
+            shadow="sm" 
+            padding="lg" 
+            radius="md" 
+            withBorder
+            style={{ minHeight: '120px' }}
+          >
             <Group justify="space-between" mb="xs">
-              <Text fw={500}>Budget verwendet</Text>
+              <Text fw={500} size="sm">Budget verwendet</Text>
               <IconCalendar size={24} />
             </Group>
             <Text size="xl" fw={700} c="yellow">
@@ -43,16 +65,22 @@ export default function HomePage() {
             </Text>
           </Card>
 
-          <Card shadow="sm" padding="lg" radius="md" withBorder>
+          <Card 
+            shadow="sm" 
+            padding="lg" 
+            radius="md" 
+            withBorder
+            style={{ minHeight: '120px' }}
+          >
             <Group justify="space-between" mb="xs">
-              <Text fw={500}>Kategorien</Text>
+              <Text fw={500} size="sm">Kategorien</Text>
               <IconSettings size={24} />
             </Group>
             <Text size="xl" fw={700}>
               12
             </Text>
           </Card>
-        </Group>
+        </SimpleGrid>
 
         <Card shadow="sm" padding="lg" radius="md" withBorder>
           <Title order={3} mb="md">Letzte Transaktionen</Title>
