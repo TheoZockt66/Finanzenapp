@@ -11,13 +11,17 @@ import {
   Drawer,
   Stack,
   Divider,
-  rem
+  rem,
+  Menu,
+  Avatar,
+  Loader
 } from '@mantine/core';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { IconMoon, IconSun, IconUser, IconMenu2, IconX } from '@tabler/icons-react';
+import { IconMoon, IconSun, IconUser, IconMenu2, IconLogout, IconLogin, IconCalculator } from '@tabler/icons-react';
 import { useState, useEffect } from 'react';
 import { useDisclosure, useMediaQuery } from '@mantine/hooks';
+import { useAuth } from '../../contexts/AuthContext';
 
 const navLinks = [
   { label: 'Dashboard', href: '/' },
@@ -32,6 +36,7 @@ export function Header() {
   const [mounted, setMounted] = useState(false);
   const [opened, { open, close }] = useDisclosure(false);
   const isMobile = useMediaQuery('(max-width: 768px)');
+  const { user, loading, signOut } = useAuth();
   
   useEffect(() => {
     setMounted(true);
@@ -39,6 +44,16 @@ export function Header() {
   
   const toggleColorScheme = () => {
     setColorScheme(colorScheme === 'dark' ? 'light' : 'dark');
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+      // Nach dem Abmelden zur Auth-Seite weiterleiten
+      window.location.href = '/auth';
+    } catch (error) {
+      console.error('Fehler beim Abmelden:', error);
+    }
   };
 
   const NavLinks = ({ onClick }: { onClick?: () => void }) => (
@@ -60,6 +75,65 @@ export function Header() {
       ))}
     </>
   );
+
+  const UserActions = () => {
+    if (loading) {
+      return <Loader size="sm" />;
+    }
+
+    if (!user) {
+      return (
+        <ActionIcon 
+          variant="subtle" 
+          size="lg"
+          color="gray"
+          component={Link}
+          href="/auth"
+          title="Anmelden"
+        >
+          <IconLogin size={20} />
+        </ActionIcon>
+      );
+    }
+
+    return (
+      <Menu shadow="md" width={200}>
+        <Menu.Target>
+          <ActionIcon 
+            variant="subtle" 
+            size="lg"
+            color="gray"
+            title="Benutzermenü"
+          >
+            <Avatar size={20} color="blue">
+              {user.email?.charAt(0).toUpperCase()}
+            </Avatar>
+          </ActionIcon>
+        </Menu.Target>
+
+        <Menu.Dropdown>
+          <Menu.Label>
+            {user.email}
+          </Menu.Label>
+          <Menu.Item 
+            leftSection={<IconUser size={14} />}
+            component={Link}
+            href="/account"
+          >
+            Konto
+          </Menu.Item>
+          <Menu.Divider />
+          <Menu.Item 
+            leftSection={<IconLogout size={14} />}
+            color="red"
+            onClick={handleSignOut}
+          >
+            Abmelden
+          </Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
+    );
+  };
   
   return (
     <>
@@ -87,9 +161,21 @@ export function Header() {
         }}
       >
         <Flex justify="space-between" align="center" w="100%">
-          <Text fw={700} size={isMobile ? "lg" : "xl"} c="blue.5">
-            {isMobile ? "HB" : "Haushaltsbuch"}
-          </Text>
+          <Group gap="xs">
+            <ActionIcon 
+              variant="subtle" 
+              size="lg"
+              color="blue"
+              component={Link}
+              href="/"
+              title="Startseite"
+            >
+              <IconCalculator size={20} />
+            </ActionIcon>
+            <Text fw={700} size={isMobile ? "lg" : "xl"} c="blue.5">
+              {isMobile ? "HB" : "Haushaltsbuch"}
+            </Text>
+          </Group>
           
           {!isMobile && (
             <Group justify="center" style={{ flex: 1 }}>
@@ -125,16 +211,7 @@ export function Header() {
               )}
             </ActionIcon>
             
-            <ActionIcon 
-              variant="subtle" 
-              size="lg"
-              color="gray"
-              component={Link}
-              href="/account"
-              title="Konto"
-            >
-              <IconUser size={20} />
-            </ActionIcon>
+            <UserActions />
           </Group>
         </Flex>
       </Box>

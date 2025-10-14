@@ -1,6 +1,7 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --vh: 1vh;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -14,6 +15,12 @@ html,
 body {
   max-width: 100vw;
   overflow-x: hidden;
+  /* Fullscreen mobile optimization */
+  -webkit-overflow-scrolling: touch;
+  /* Prevent text size adjustment on orientation change */
+  -webkit-text-size-adjust: 100%;
+  -ms-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
@@ -26,6 +33,11 @@ body {
   -webkit-touch-callout: none;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
+  /* PWA Safe area support */
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }
 
 * {
@@ -47,6 +59,63 @@ select,
 textarea {
   min-height: 44px;
   min-width: 44px;
+}
+
+/* Exclude NumberInput stepper buttons from global touch target size */
+button.mantine-NumberInput-control {
+  min-height: 22px;
+  min-width: 32px;
+  padding: 0;
+  line-height: 1;
+}
+
+.mantine-NumberInput-control {
+  min-height: 22px;
+  min-width: 32px;
+  padding: 0;
+  line-height: 1;
+}
+
+.mantine-ActionIcon-root {
+  min-height: auto;
+  min-width: auto;
+}
+
+.mantine-NumberInput-controls {
+  min-width: 36px;
+}
+
+/* Disable zoom on form inputs (prevents iOS zoom) */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+input[type="tel"],
+input[type="url"],
+input[type="search"],
+textarea,
+select {
+  font-size: 16px !important;
+}
+
+/* Mobile viewport height fix for iOS */
+@supports (-webkit-touch-callout: none) {
+  html {
+    height: calc(100 * var(--vh));
+  }
+}
+
+/* PWA display modes */
+@media (display-mode: fullscreen) {
+  body {
+    background-color: var(--background);
+  }
+}
+
+@media (display-mode: standalone) {
+  body {
+    background-color: var(--background);
+  }
 }
 
 /* Improved scrolling on mobile */

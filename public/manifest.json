@@ -3,13 +3,22 @@
   "short_name": "Haushaltsbuch",
   "description": "Dein persönliches Haushaltsbuch für die Verwaltung deiner Finanzen",
   "start_url": "/",
-  "display": "standalone",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone", "minimal-ui"],
   "background_color": "#1a1b1e",
   "theme_color": "#339af0",
   "orientation": "portrait-primary",
   "categories": ["finance", "productivity"],
   "lang": "de",
+  "scope": "/",
+  "prefer_related_applications": false,
   "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
     {
       "src": "/icon-192.png",
       "sizes": "192x192",
@@ -21,6 +30,22 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Neue Ausgabe",
+      "short_name": "Ausgabe",
+      "description": "Schnell eine neue Ausgabe hinzufügen",
+      "url": "/costs",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Budget",
+      "short_name": "Budget",
+      "description": "Budget anzeigen",
+      "url": "/budget",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
     }
   ]
 }

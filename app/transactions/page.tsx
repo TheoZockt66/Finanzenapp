@@ -1,6 +1,6 @@
-﻿'use client';
+'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { 
   Container, 
   Title, 
@@ -24,18 +24,20 @@ import {
   SimpleGrid,
   Flex,
   ScrollArea,
-  Anchor,
-  Avatar,
   Menu,
   rem
 } from '@mantine/core';
 import { DatePickerInput, DateInput } from '@mantine/dates';
-import { IconPlus, IconTrash, IconEdit, IconFilter, IconFilterOff, IconSearch, IconDotsVertical, IconTrendingUp, IconTrendingDown, IconCalendar, IconReceipt, IconSwipeLeft } from '@tabler/icons-react';
+import { IconPlus, IconTrash, IconEdit, IconFilter, IconFilterOff, IconSearch, IconDotsVertical, IconTrendingUp, IconTrendingDown, IconCalendar, IconReceipt } from '@tabler/icons-react';
 import { useDisclosure, useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import dayjs from 'dayjs';
 import 'dayjs/locale/de';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
+import { useTransactions } from '../../hooks/useTransactions';
+import { useBudgets } from '../../hooks/useBudgets';
+import { useTransactionCategories } from '../../hooks/useTransactionCategories';
+import type { FinanzenTransactionCategory, FinanzenBudget } from '../../lib/types';
 
 dayjs.extend(customParseFormat);
 dayjs.locale('de');
@@ -44,7 +46,9 @@ interface Transaction {
   id: string;
   typ: 'Einnahme' | 'Ausgabe';
   kategorie: string;
+  kategorieId?: string | null;
   budget: string;
+  budgetId?: string | null;
   betrag: number;
   beschreibung: string;
   datum: Date;
@@ -60,21 +64,10 @@ interface BudgetItem {
   beschreibung: string;
 }
 
-const kategorieOptions = [
-  { value: 'Lebensmittel', label: 'Lebensmittel', color: 'green' },
-  { value: 'Transport', label: 'Transport', color: 'blue' },
-  { value: 'Unterhaltung', label: 'Unterhaltung', color: 'orange' },
-  { value: 'Gesundheit', label: 'Gesundheit', color: 'red' },
-  { value: 'Bildung', label: 'Bildung', color: 'purple' },
-  { value: 'Kleidung', label: 'Kleidung', color: 'pink' },
-  { value: 'Haushalt', label: 'Haushalt', color: 'cyan' },
-  { value: 'Sonstiges', label: 'Sonstiges', color: 'gray' }
-];
-
 interface FilterState {
   typ: string;
-  kategorie: string;
-  budget: string;
+  kategorieId: string;
+  budgetId: string;
   dateFrom: Date | null;
   dateTo: Date | null;
   minBetrag: number | undefined;
@@ -82,76 +75,119 @@ interface FilterState {
   searchText: string;
 }
 
+interface TransactionFormState {
+  typ: 'Einnahme' | 'Ausgabe';
+  kategorieId: string;
+  budgetId: string;
+  betrag: number;
+  beschreibung: string;
+  datum: Date;
+}
+
 export default function TransactionsPage() {
   const isMobile = useMediaQuery('(max-width: 768px)');
   
-  // Budget State - synchronisiert mit Budget-Seite
-  const [budgets, setBudgets] = useState<BudgetItem[]>([
-    { 
-      id: '1', 
-      name: 'Lebensmittel', 
-      betrag: 400, 
-      ausgegeben: 285.50, 
-      resetTag: 1, 
-      farbe: 'green',
-      beschreibung: 'Monatliches Budget fuer Lebensmittel'
-    },
-    { 
-      id: '2', 
-      name: 'Freizeit & Unterhaltung', 
-      betrag: 200, 
-      ausgegeben: 145, 
-      resetTag: 1, 
-      farbe: 'purple',
-      beschreibung: 'Kino, Konzerte, Hobbys'
-    },
-    { 
-      id: '3', 
-      name: 'Kleidung', 
-      betrag: 150, 
-      ausgegeben: 89, 
-      resetTag: 1, 
-      farbe: 'pink',
-      beschreibung: 'Kleidung, Schuhe und Accessoires'
-    }
-  ]);
+  const {
+    transactions: transactionRecords,
+    loading: transactionsLoading,
+    addTransaction,
+    editTransaction,
+    removeTransaction,
+  } = useTransactions();
 
-  // Transactions State
-  const [transactions, setTransactions] = useState<Transaction[]>([
-    {
-      id: '1',
-      typ: 'Ausgabe',
-      kategorie: 'Lebensmittel',
-      budget: 'Lebensmittel',
-      betrag: 45.60,
-      beschreibung: 'Wocheneinkauf Supermarkt',
-      datum: new Date('2024-01-15')
-    },
-    {
-      id: '2',
-      typ: 'Ausgabe',
-      kategorie: 'Transport',
-      budget: 'Lebensmittel',
-      betrag: 12.80,
-      beschreibung: 'Monatskarte oeffentliche Verkehrsmittel',
-      datum: new Date('2024-01-14')
-    },
-    {
-      id: '3',
-      typ: 'Einnahme',
-      kategorie: 'Sonstiges',
-      budget: 'Lebensmittel',
-      betrag: 50.00,
-      beschreibung: 'Rueckerstattung',
-      datum: new Date('2024-01-13')
-    }
-  ]);
+  const {
+    budgets: budgetRecords,
+    loading: budgetsLoading,
+    refresh: refreshBudgets,
+  } = useBudgets();
+
+  const {
+    categories,
+    loading: categoriesLoading,
+  } = useTransactionCategories();
+
+  const isLoadingData = transactionsLoading || budgetsLoading || categoriesLoading;
+
+  const categoryById = useMemo(() => {
+    const map = new Map<string, FinanzenTransactionCategory>();
+    categories.forEach((category) => {
+      map.set(category.id, category);
+    });
+    return map;
+  }, [categories]);
+
+  const budgetById = useMemo(() => {
+    const map = new Map<string, FinanzenBudget>();
+    budgetRecords.forEach((budget) => {
+      map.set(budget.id, budget);
+    });
+    return map;
+  }, [budgetRecords]);
+
+  const budgets: BudgetItem[] = useMemo(() => {
+    return budgetRecords.map((budget) => ({
+      id: budget.id,
+      name: budget.name,
+      betrag: Number(budget.amount ?? 0),
+      ausgegeben: Number(budget.spent ?? 0),
+      resetTag: budget.reset_day ?? 1,
+      farbe: budget.category_id ? categoryById.get(budget.category_id)?.color ?? 'blue' : 'blue',
+      beschreibung: '',
+    }));
+  }, [budgetRecords, categoryById]);
+
+  const transactions = useMemo<Transaction[]>(() => {
+    return transactionRecords.map((transaction) => {
+      const categoryInfo = transaction.category_id ? categoryById.get(transaction.category_id) : undefined;
+      const budgetInfo = transaction.budget_id ? budgetById.get(transaction.budget_id) : undefined;
+
+      return {
+        id: transaction.id,
+        typ: transaction.type === 'income' ? 'Einnahme' : 'Ausgabe',
+        kategorie: categoryInfo?.name ?? (transaction.category_id ? 'Unbekannte Kategorie' : 'Keine Kategorie'),
+        kategorieId: transaction.category_id,
+        budget: budgetInfo?.name ?? (transaction.budget_id ? 'Unbekanntes Budget' : 'Kein Budget'),
+        budgetId: transaction.budget_id,
+        betrag: Number(transaction.amount ?? 0),
+        beschreibung: transaction.description ?? '',
+        datum: transaction.transaction_date ? dayjs(transaction.transaction_date).toDate() : new Date(),
+      };
+    });
+  }, [transactionRecords, categoryById, budgetById]);
+
+  const kategorieOptions = useMemo(
+    () =>
+      categories.map((category) => ({
+        value: category.id,
+        label: category.name,
+        color: category.color || 'gray',
+      })),
+    [categories]
+  );
+
+  const budgetFilterOptions = useMemo(
+    () =>
+      budgets.map((budget) => ({
+        value: budget.id,
+        label: budget.name,
+      })),
+    [budgets]
+  );
+
+  const budgetFormOptions = useMemo(
+    () =>
+      budgets.map((budget) => ({
+        value: budget.id,
+        label: `${budget.name} (${(budget.betrag - budget.ausgegeben).toFixed(0)}€ verfügbar)`,
+      })),
+    [budgets]
+  );
 
   // Filter State
   const [filters, setFilters] = useState<FilterState>({
     typ: '',
-    kategorie: '',
-    budget: '',
+    kategorieId: '',
+    budgetId: '',
     dateFrom: null,
     dateTo: null,
     minBetrag: undefined,
@@ -165,41 +201,33 @@ export default function TransactionsPage() {
   const [filtersOpened, { toggle: toggleFilters }] = useDisclosure(false);
 
   // Form Fields
-  const [formData, setFormData] = useState<Omit<Transaction, 'id'>>({
+  const [formData, setFormData] = useState<TransactionFormState>({
     typ: 'Ausgabe',
-    kategorie: '',
-    budget: '',
+    kategorieId: '',
+    budgetId: '',
     betrag: 0,
     beschreibung: '',
     datum: new Date()
   });
 
   // Helper Funktionen
-  const getCategoryColor = (kategorie: string) => {
-    const category = kategorieOptions.find(k => k.value === kategorie);
-    return category?.color || 'gray';
+  const getCategoryColor = (categoryId?: string | null) => {
+    if (!categoryId) return 'gray';
+    return categoryById.get(categoryId)?.color || 'gray';
   };
 
-  const getBudgetInfo = (budgetName: string) => {
-    return budgets.find(b => b.name === budgetName);
-  };
-
-  // Funktion zum Aktualisieren des Budget-Ausgaben-Betrags
-  const updateBudgetSpent = (budgetName: string, amount: number) => {
-    setBudgets(prevBudgets => 
-      prevBudgets.map(budget => 
-        budget.name === budgetName
-          ? { ...budget, ausgegeben: budget.ausgegeben + amount }
-          : budget
-      )
-    );
+  const getBudgetInfo = (budgetId?: string | null) => {
+    if (!budgetId) {
+      return undefined;
+    }
+    return budgets.find((budget) => budget.id === budgetId);
   };
 
   // Filter-Funktionen
   const applyFilters = (transaction: Transaction) => {
     if (filters.typ && transaction.typ !== filters.typ) return false;
-    if (filters.kategorie && transaction.kategorie !== filters.kategorie) return false;
-    if (filters.budget && transaction.budget !== filters.budget) return false;
+    if (filters.kategorieId && transaction.kategorieId !== filters.kategorieId) return false;
+    if (filters.budgetId && transaction.budgetId !== filters.budgetId) return false;
     if (filters.dateFrom && dayjs(transaction.datum).isBefore(dayjs(filters.dateFrom))) return false;
     if (filters.dateTo && dayjs(transaction.datum).isAfter(dayjs(filters.dateTo))) return false;
     if (filters.minBetrag && transaction.betrag < filters.minBetrag) return false;
@@ -211,8 +239,8 @@ export default function TransactionsPage() {
   const clearFilters = () => {
     setFilters({
       typ: '',
-      kategorie: '',
-      budget: '',
+      kategorieId: '',
+      budgetId: '',
       dateFrom: null,
       dateTo: null,
       minBetrag: undefined,
@@ -222,7 +250,7 @@ export default function TransactionsPage() {
   };
 
   const hasActiveFilters = () => {
-    return filters.typ || filters.kategorie || filters.budget || filters.dateFrom || 
+    return filters.typ || filters.kategorieId || filters.budgetId || filters.dateFrom || 
            filters.dateTo || filters.minBetrag || filters.maxBetrag || filters.searchText;
   };
 
@@ -232,8 +260,8 @@ export default function TransactionsPage() {
   const resetForm = () => {
     setFormData({
       typ: 'Ausgabe',
-      kategorie: '',
-      budget: '',
+      kategorieId: '',
+      budgetId: '',
       betrag: 0,
       beschreibung: '',
       datum: new Date()
@@ -250,8 +278,8 @@ export default function TransactionsPage() {
     setEditingTransaction(transaction);
     setFormData({
       typ: transaction.typ,
-      kategorie: transaction.kategorie,
-      budget: transaction.budget,
+      kategorieId: transaction.kategorieId ?? '',
+      budgetId: transaction.budgetId ?? '',
       betrag: transaction.betrag,
       beschreibung: transaction.beschreibung,
       datum: transaction.datum
@@ -259,57 +287,91 @@ export default function TransactionsPage() {
     open();
   };
 
-  const handleSubmit = () => {
-    if (!formData.kategorie || !formData.budget || !formData.beschreibung || formData.betrag <= 0) {
+  const handleSubmit = async () => {
+    if (!formData.beschreibung || formData.betrag <= 0) {
+      notifications.show({
+        title: 'Unvollständige Angaben',
+        message: 'Bitte fülle alle Pflichtfelder aus.',
+        color: 'orange',
+      });
       return;
     }
 
-    if (editingTransaction) {
-      // Update existing transaction
-      const oldTransaction = editingTransaction;
-      const newTransaction = { ...formData, id: editingTransaction.id };
-
-      setTransactions(transactions.map(t => 
-        t.id === editingTransaction.id ? newTransaction : t
-      ));
-
-      // Budget-Synchronisation bei Aenderungen
-      if (oldTransaction.typ === 'Ausgabe') {
-        updateBudgetSpent(oldTransaction.budget, -oldTransaction.betrag);
-      }
-      if (newTransaction.typ === 'Ausgabe') {
-        updateBudgetSpent(newTransaction.budget, newTransaction.betrag);
-      }
-    } else {
-      // Add new transaction
-      const newTransaction = {
-        ...formData,
-        id: Date.now().toString()
-      };
-      setTransactions([newTransaction, ...transactions]);
-      
-      // Budget synchronisieren bei Ausgaben
-      if (formData.typ === 'Ausgabe') {
-        updateBudgetSpent(formData.budget, formData.betrag);
-      }
+    if (!formData.kategorieId || !formData.budgetId) {
+      notifications.show({
+        title: 'Auswahl erforderlich',
+        message: 'Bitte wähle eine Kategorie und ein Budget aus.',
+        color: 'orange',
+      });
+      return;
     }
 
-    resetForm();
-    close();
+
+
+    const payload = {
+      amount: formData.betrag,
+      description: formData.beschreibung,
+      type: formData.typ === 'Einnahme' ? 'income' : 'expense',
+      category_id: formData.kategorieId || null,
+      budget_id: formData.budgetId || null,
+      transaction_date: dayjs(formData.datum).format('YYYY-MM-DD'),
+      is_recurring: false,
+    };
+
+    try {
+      setIsSubmitting(true);
+
+      if (editingTransaction) {
+        await editTransaction(editingTransaction.id, payload);
+        notifications.show({
+          title: 'Transaktion aktualisiert',
+          message: 'Die Transaktion wurde erfolgreich angepasst.',
+          color: 'green',
+        });
+      } else {
+        await addTransaction(payload);
+        notifications.show({
+          title: 'Transaktion erstellt',
+          message: 'Die neue Transaktion wurde gespeichert.',
+          color: 'green',
+        });
+      }
+
+      await refreshBudgets();
+      resetForm();
+      close();
+    } catch (error) {
+      console.error('Fehler beim Speichern der Transaktion:', error);
+      notifications.show({
+        title: 'Fehler beim Speichern',
+        message: 'Die Transaktion konnte nicht gespeichert werden.',
+        color: 'red',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleDeleteTransaction = (id: string) => {
-    const transaction = transactions.find(t => t.id === id);
-    if (transaction && transaction.typ === 'Ausgabe') {
-      updateBudgetSpent(transaction.budget, -transaction.betrag);
+  const handleDeleteTransaction = async (id: string) => {
+    try {
+      const success = await removeTransaction(id);
+      if (!success) {
+        throw new Error('Transaktion konnte nicht gelöscht werden');
+      }
+      await refreshBudgets();
+      notifications.show({
+        title: 'Transaktion gelöscht',
+        message: 'Die Transaktion wurde erfolgreich entfernt.',
+        color: 'green',
+      });
+    } catch (error) {
+      console.error('Fehler beim Löschen der Transaktion:', error);
+      notifications.show({
+        title: 'Fehler beim Löschen',
+        message: 'Die Transaktion konnte nicht gelöscht werden.',
+        color: 'red',
+      });
     }
-    setTransactions(transactions.filter(t => t.id !== id));
-    
-    notifications.show({
-      title: 'Transaktion gelöscht',
-      message: 'Die Transaktion wurde erfolgreich entfernt.',
-      color: 'green',
-    });
   };
 
   // Mobile Transaction Card Component
@@ -341,7 +403,7 @@ export default function TransactionsPage() {
                 {transaction.typ}
               </Badge>
               <Badge 
-                color={getCategoryColor(transaction.kategorie)} 
+                color={getCategoryColor(transaction.kategorieId)} 
                 variant="dot"
                 size="sm"
               >
@@ -358,7 +420,7 @@ export default function TransactionsPage() {
               </Text>
               <Text size="xs" c="dimmed">•</Text>
               <Text size="xs" c="dimmed">
-                {transaction.budget}
+                {transaction.budget || 'Kein Budget'}
               </Text>
             </Group>
           </Stack>
@@ -429,6 +491,7 @@ export default function TransactionsPage() {
             <Button 
               leftSection={<IconPlus size={16} />} 
               onClick={openAddForm}
+              disabled={isLoadingData}
               size="sm"
             >
               Neue Transaktion
@@ -501,8 +564,8 @@ export default function TransactionsPage() {
                     label="Kategorie"
                     placeholder="Alle"
                     data={kategorieOptions}
-                    value={filters.kategorie}
-                    onChange={(value) => setFilters(prev => ({ ...prev, kategorie: value || '' }))}
+                    value={filters.kategorieId}
+                    onChange={(value) => setFilters(prev => ({ ...prev, kategorieId: value || '' }))}
                     clearable
                     size="md"
                   />
@@ -510,9 +573,9 @@ export default function TransactionsPage() {
                 <Select
                   label="Budget"
                   placeholder="Alle Budgets"
-                  data={budgets.map(b => ({ value: b.name, label: b.name }))}
-                  value={filters.budget}
-                  onChange={(value) => setFilters(prev => ({ ...prev, budget: value || '' }))}
+                  data={budgetFilterOptions}
+                  value={filters.budgetId}
+                  onChange={(value) => setFilters(prev => ({ ...prev, budgetId: value || '' }))}
                   clearable
                   size="md"
                 />
@@ -571,8 +634,8 @@ export default function TransactionsPage() {
                     label="Kategorie"
                     placeholder="Alle Kategorien"
                     data={kategorieOptions}
-                    value={filters.kategorie}
-                    onChange={(value) => setFilters(prev => ({ ...prev, kategorie: value || '' }))}
+                    value={filters.kategorieId}
+                    onChange={(value) => setFilters(prev => ({ ...prev, kategorieId: value || '' }))}
                     clearable
                   />
                 </Grid.Col>
@@ -580,9 +643,9 @@ export default function TransactionsPage() {
                   <Select
                     label="Budget"
                     placeholder="Alle Budgets"
-                    data={budgets.map(b => ({ value: b.name, label: b.name }))}
-                    value={filters.budget}
-                    onChange={(value) => setFilters(prev => ({ ...prev, budget: value || '' }))}
+                    data={budgetFilterOptions}
+                    value={filters.budgetId}
+                    onChange={(value) => setFilters(prev => ({ ...prev, budgetId: value || '' }))}
                     clearable
                   />
                 </Grid.Col>
@@ -698,7 +761,7 @@ export default function TransactionsPage() {
                   {hasActiveFilters() ? 'Keine Transaktionen gefunden, die den Filterkriterien entsprechen.' : 'Noch keine Transaktionen vorhanden.'}
                 </Text>
                 {!hasActiveFilters() && (
-                  <Button leftSection={<IconPlus size={16} />} onClick={openAddForm}>
+                  <Button leftSection={<IconPlus size={16} />} onClick={openAddForm} disabled={isLoadingData}>
                     Erste Transaktion hinzufügen
                   </Button>
                 )}
@@ -750,7 +813,7 @@ export default function TransactionsPage() {
                             </Table.Td>
                             <Table.Td>
                               <Badge 
-                                color={getCategoryColor(transaction.kategorie)} 
+                                color={getCategoryColor(transaction.kategorieId)} 
                                 variant="light"
                               >
                                 {transaction.kategorie}
@@ -758,10 +821,10 @@ export default function TransactionsPage() {
                             </Table.Td>
                             <Table.Td>
                               <Badge 
-                                color={getBudgetInfo(transaction.budget)?.farbe || 'gray'} 
+                                color={getBudgetInfo(transaction.budgetId)?.farbe || 'gray'} 
                                 variant="outline"
                               >
-                                {transaction.budget}
+                                {transaction.budget || 'Kein Budget'}
                               </Badge>
                             </Table.Td>
                             <Table.Td>
@@ -854,12 +917,9 @@ export default function TransactionsPage() {
             <Select
               label="Kategorie"
               placeholder="Kategorie auswählen"
-              data={kategorieOptions.map(cat => ({ 
-                ...cat, 
-                label: `${cat.label}` 
-              }))}
-              value={formData.kategorie}
-              onChange={(value) => setFormData(prev => ({ ...prev, kategorie: value || '' }))}
+              data={kategorieOptions}
+              value={formData.kategorieId}
+              onChange={(value) => setFormData(prev => ({ ...prev, kategorieId: value || '' }))}
               required
               size={isMobile ? "md" : "sm"}
             />
@@ -867,12 +927,9 @@ export default function TransactionsPage() {
             <Select
               label="Budget"
               placeholder="Budget auswählen"
-              data={budgets.map(b => ({ 
-                value: b.name, 
-                label: `${b.name} (${(b.betrag - b.ausgegeben).toFixed(0)}€ verfügbar)` 
-              }))}
-              value={formData.budget}
-              onChange={(value) => setFormData(prev => ({ ...prev, budget: value || '' }))}
+              data={budgetFormOptions}
+              value={formData.budgetId}
+              onChange={(value) => setFormData(prev => ({ ...prev, budgetId: value || '' }))}
               required
               size={isMobile ? "md" : "sm"}
             />
@@ -903,6 +960,7 @@ export default function TransactionsPage() {
               <Button 
                 variant="outline" 
                 onClick={close}
+                disabled={isSubmitting}
                 size={isMobile ? "md" : "sm"}
                 style={{ flex: isMobile ? 1 : 'none' }}
               >
@@ -910,6 +968,8 @@ export default function TransactionsPage() {
               </Button>
               <Button 
                 onClick={handleSubmit}
+                loading={isSubmitting}
+                disabled={isSubmitting}
                 size={isMobile ? "md" : "sm"}
                 style={{ flex: isMobile ? 1 : 'none' }}
               >
@@ -934,6 +994,7 @@ export default function TransactionsPage() {
             zIndex: 1000,
             boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
           }}
+          disabled={isLoadingData}
           onClick={openAddForm}
         >
           <IconPlus size={24} />

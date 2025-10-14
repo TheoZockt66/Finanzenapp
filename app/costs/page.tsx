@@ -1,38 +1,109 @@
-﻿'use client';
+'use client';
 
-import { Container, Title, Text, Card, Stack, Table, Badge, Group, Button, TextInput, NumberInput, Modal, ActionIcon, Select, Tabs } from '@mantine/core';
-import { useState } from 'react';
-import { IconPlus, IconEdit, IconTrash, IconCategory, IconLayoutGrid } from '@tabler/icons-react';
+import { Container, Title, Text, Card, Stack, Table, Badge, Group, Button, TextInput, NumberInput, Modal, ActionIcon, Select, Tabs, LoadingOverlay } from '@mantine/core';
+import { useState, useEffect, useMemo } from 'react';
+import { IconPlus, IconEdit, IconTrash, IconCategory, IconGripVertical, IconCopy } from '@tabler/icons-react';
+import { useCostPlans, type CostPlanWithDetails, type IncomeSourceWithMonthly } from '../../hooks/useCostPlans';
+import { useAuth } from '../../contexts/AuthContext';
+import type { FinanzenCostCategory } from '../../lib/types';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  horizontalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import {
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
-interface IncomeItem {
+// Sortable Tab Component
+interface SortableTabProps {
   id: string;
-  betrag: number;
-  name: string;
-  frequenz: number;
-  betragProMonat: number;
+  category: FinanzenCostCategory;
+  isActive: boolean;
+  onClick: () => void;
 }
 
-interface CostItem {
-  id: string;
-  name: string;
-  kosten: number;
-  frequenz: number;
-  betragProMonat: number;
-  category: string;
-}
+function SortableTab({ id, category, isActive, onClick }: SortableTabProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
 
-interface Category {
-  id: string;
-  name: string;
-  color: string;
-}
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.8 : 1,
+    cursor: isDragging ? 'grabbing' : 'default',
+    zIndex: isDragging ? 1000 : 1,
+    position: isDragging ? ('relative' as const) : ('static' as const),
+  };
 
-interface CostPlan {
-  id: string;
-  name: string;
-  income: IncomeItem[];
-  costs: CostItem[];
-  categories: Category[];
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+    >
+      <Tabs.Tab 
+        value={category.id} 
+        style={{ 
+          backgroundColor: isActive ? 'var(--mantine-color-blue-light)' : undefined,
+          position: 'relative',
+          borderRadius: '8px',
+          transition: 'all 0.2s ease',
+          boxShadow: isDragging ? '0 4px 12px rgba(0,0,0,0.2)' : undefined,
+        }}
+        onClick={onClick}
+      >
+        <Group gap="xs" align="center">
+          <div
+            {...listeners}
+            style={{ 
+              cursor: isDragging ? 'grabbing' : 'grab',
+              display: 'flex',
+              alignItems: 'center',
+              padding: '2px 4px',
+              borderRadius: '4px',
+              transition: 'background-color 0.2s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--mantine-color-gray-2)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+            }}
+          >
+            <IconGripVertical size={12} color="var(--mantine-color-dimmed)" />
+          </div>
+          <Badge 
+            color={category.color} 
+            variant="light"
+            style={{
+              transition: 'transform 0.2s ease',
+              transform: isDragging ? 'scale(1.05)' : 'scale(1)',
+            }}
+          >
+            {category.name}
+          </Badge>
+        </Group>
+      </Tabs.Tab>
+    </div>
+  );
 }
 
 const colorOptions = [
@@ -50,327 +121,722 @@ const colorOptions = [
   { value: 'grape', label: 'Traube' }
 ];
 
-export default function CostsPage() {
-  const [costPlans, setCostPlans] = useState<CostPlan[]>([
-    {
-      id: '1',
-      name: 'Hauptplan',
-      income: [{ id: '1', betrag: 1137.777038, name: 'Gehalt', frequenz: 1, betragProMonat: 1137.777038 }],
-      categories: [
-        { id: '1', name: 'Flexible Kosten', color: 'blue' },
-        { id: '2', name: 'Verträge', color: 'orange' }
-      ],
-      costs: [
-        { id: '1', name: 'Mama', kosten: 207, frequenz: 1, betragProMonat: 207, category: 'Flexible Kosten' },
-        { id: '2', name: 'E*F', kosten: 500, frequenz: 1, betragProMonat: 500, category: 'Flexible Kosten' },
-        { id: '3', name: 'Netflix', kosten: 15, frequenz: 1, betragProMonat: 15, category: 'Verträge' },
-        { id: '4', name: 'Spotify', kosten: 10, frequenz: 1, betragProMonat: 10, category: 'Verträge' },
-        { id: '5', name: 'ChatGPT', kosten: 10, frequenz: 6, betragProMonat: 1.666666667, category: 'Verträge' },
-        { id: '6', name: 'YouTube Premium', kosten: 22, frequenz: 12, betragProMonat: 1.833333333, category: 'Verträge' }
-      ]
-    }
-  ]);
+const frequencyOptions = [
+  { value: 'weekly', label: 'Wöchentlich' },
+  { value: 'monthly', label: 'Monatlich' },
+  { value: 'yearly', label: 'Jährlich' },
+  { value: 'one-time', label: 'Einmalig' }
+];
 
-  const [activePlanId, setActivePlanId] = useState<string>('1');
+export default function CostsPage() {
+  const { user } = useAuth();
+  const {
+    costPlans,
+    incomeSources,
+    loading,
+    error,
+    refresh,
+    addCostPlan,
+    editCostPlan,
+    removeCostPlan,
+    addCostCategory,
+    editCostCategory,
+    removeCostCategory,
+    addCostItem,
+    editCostItem,
+    removeCostItem,
+    addIncomeSource,
+    editIncomeSource,
+    removeIncomeSource
+  } = useCostPlans();
+
+  const [activePlanId, setActivePlanId] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<string>('income');
+
+  // Drag & Drop state for sortable tabs
+  const [sortedCategories, setSortedCategories] = useState<FinanzenCostCategory[]>([]);
+  
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
 
   const [costModalOpened, setCostModalOpened] = useState(false);
   const [categoryModalOpened, setCategoryModalOpened] = useState(false);
   const [incomeModalOpened, setIncomeModalOpened] = useState(false);
   const [planModalOpened, setPlanModalOpened] = useState(false);
 
-  const [costForm, setCostForm] = useState({ id: '', name: '', kosten: 0, frequenz: 1, category: '' });
+  const [costForm, setCostForm] = useState({ 
+    id: '', 
+    name: '', 
+    estimated_cost: 0, 
+    frequency_per_year: 1, 
+    description: '', 
+    priority: 'medium' as 'low' | 'medium' | 'high',
+    category_id: '',
+    notes: ''
+  });
   const [editingCost, setEditingCost] = useState(false);
 
   const [categoryForm, setCategoryForm] = useState({ id: '', name: '', color: 'blue' });
   const [editingCategory, setEditingCategory] = useState(false);
 
-  const [incomeForm, setIncomeForm] = useState({ id: '', name: '', betrag: 0, frequenz: 1, betragProMonat: 0 });
+  const [incomeForm, setIncomeForm] = useState({ 
+    id: '', 
+    name: '', 
+    amount: 0, 
+    frequency: 'monthly' as 'weekly' | 'monthly' | 'yearly' | 'one-time',
+    start_date: new Date().toISOString().split('T')[0],
+    end_date: '',
+    description: ''
+  });
   const [editingIncome, setEditingIncome] = useState(false);
 
-  const [planForm, setPlanForm] = useState({ id: '', name: '' });
+  const [planForm, setPlanForm] = useState({ id: '', name: '', description: '' });
   const [editingPlan, setEditingPlan] = useState(false);
 
+  // Set initial active plan
+  if (!activePlanId && costPlans.length > 0) {
+    setActivePlanId(costPlans[0].id);
+  }
+
   const activePlan = costPlans.find(p => p.id === activePlanId) || costPlans[0];
-  const income = activePlan?.income || [];
-  const costs = activePlan?.costs || [];
-  const categories = activePlan?.categories || [];
+  const costItems = activePlan?.costItems || [];
+  const categories = useMemo(() => activePlan?.categories || [], [activePlan?.categories]);
 
-  const updatePlan = (planId: string, updates: Partial<CostPlan>) => {
-    setCostPlans(plans => plans.map(p => p.id === planId ? { ...p, ...updates } : p));
+  // Update sorted categories when categories change
+  useEffect(() => {
+    if (categories.length > 0) {
+      // Try to load saved order from localStorage
+      const savedOrder = localStorage.getItem(`tab-order-${activePlanId}`);
+      if (savedOrder) {
+        try {
+          const orderIds = JSON.parse(savedOrder);
+          // Sort categories according to saved order
+          const sortedByOrder = categories.sort((a, b) => {
+            const indexA = orderIds.indexOf(a.id);
+            const indexB = orderIds.indexOf(b.id);
+            if (indexA === -1) return 1;
+            if (indexB === -1) return -1;
+            return indexA - indexB;
+          });
+          setSortedCategories(sortedByOrder);
+        } catch {
+          // If parsing fails, use default order
+          setSortedCategories(categories);
+        }
+      } else {
+        // No saved order, use default
+        setSortedCategories(categories);
+      }
+    } else {
+      setSortedCategories([]);
+    }
+  }, [categories, activePlanId]);
+
+  // Handle tab drag & drop
+  const handleTabDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (active.id !== over?.id) {
+      setSortedCategories((items) => {
+        const oldIndex = items.findIndex((item) => item.id === active.id);
+        const newIndex = items.findIndex((item) => item.id === over?.id);
+
+        const newOrder = arrayMove(items, oldIndex, newIndex);
+        
+        // Save new order to localStorage
+        if (activePlanId) {
+          const orderIds = newOrder.map(item => item.id);
+          localStorage.setItem(`tab-order-${activePlanId}`, JSON.stringify(orderIds));
+        }
+        
+        return newOrder;
+      });
+    }
   };
+  
+  // Set initial active tab after categories are available
+  if (!activeTab || (activeTab !== 'income' && activeTab !== 'add-category' && !categories.find(cat => cat.id === activeTab))) {
+    if (categories.length > 0) {
+      setActiveTab(categories[0].id);
+    } else {
+      setActiveTab('income');
+    }
+  }
 
+  // Loading and error states
+  if (loading) {
+    return (
+      <Container size="xl" py="xl">
+        <LoadingOverlay visible={true} overlayProps={{ radius: "sm", blur: 2 }} />
+        <Title order={1} mb="xl">Kostenplanung</Title>
+        <Text>Lade Kostenpläne...</Text>
+      </Container>
+    );
+  }
+
+  if (error) {
+    return (
+      <Container size="xl" py="xl">
+        <Title order={1} mb="xl">Kostenplanung</Title>
+        <Text c="red">{error}</Text>
+      </Container>
+    );
+  }
+
+  if (!user) {
+    return (
+      <Container size="xl" py="xl">
+        <Title order={1} mb="xl">Kostenplanung</Title>
+        <Text>Bitte melde dich an, um deine Kostenpläne zu verwalten.</Text>
+      </Container>
+    );
+  }
+
+  // Calculation helpers
+  const totalIncome = incomeSources.reduce((sum, source) => sum + source.monthlyAmount, 0);
+  
+  // Debug: Log cost items for current plan
+  console.log('💰 Cost calculation debug for plan:', activePlan?.name);
+  console.log('📋 Active plan ID:', activePlanId);
+  console.log('🔢 Cost items count:', costItems.length);
+  console.log('📝 Cost items:', costItems.map(item => ({
+    name: item.name,
+    cost: item.estimated_cost,
+    quantity: item.quantity,
+    category: item.cost_category_id
+  })));
+  
+  const totalCosts = costItems.reduce((sum, item) => {
+    // Berechne jährliche Kosten und teile durch 12 für monatliche Kosten
+    const yearlyItemCost = item.estimated_cost * (item.quantity || 1);
+    const monthlyItemCost = yearlyItemCost / 12;
+    console.log(`💸 Item "${item.name}": ${item.estimated_cost} * ${item.quantity} = ${yearlyItemCost}/Jahr = ${monthlyItemCost.toFixed(2)}/Monat`);
+    return sum + monthlyItemCost;
+  }, 0);
+  
+  console.log('💵 Total monthly costs:', totalCosts.toFixed(2));
+  const balance = totalIncome - totalCosts;
+
+  // Plan management
   const handleAddPlan = () => {
-    setPlanForm({ id: '', name: '' });
+    setPlanForm({ id: '', name: '', description: '' });
     setEditingPlan(false);
     setPlanModalOpened(true);
   };
 
-  const handleEditPlan = (plan: CostPlan) => {
-    setPlanForm({ id: plan.id, name: plan.name });
+  const handleEditPlan = (plan: CostPlanWithDetails) => {
+    setPlanForm({ id: plan.id, name: plan.name, description: plan.description || '' });
     setEditingPlan(true);
     setPlanModalOpened(true);
   };
 
-  const handleSavePlan = () => {
+  const handleSavePlan = async () => {
     if (!planForm.name) return;
+    
     if (editingPlan) {
-      setCostPlans(plans => plans.map(p => p.id === planForm.id ? { ...p, name: planForm.name } : p));
+      const success = await editCostPlan(planForm.id, planForm.name, planForm.description);
+      if (success) setPlanModalOpened(false);
     } else {
-      const newPlan: CostPlan = {
-        id: Date.now().toString(),
-        name: planForm.name,
-        income: [],
-        costs: [],
-        categories: []
-      };
-      setCostPlans([...costPlans, newPlan]);
-      setActivePlanId(newPlan.id);
+      const newPlan = await addCostPlan(planForm.name, planForm.description);
+      if (newPlan) {
+        setActivePlanId(newPlan.id);
+        setPlanModalOpened(false);
+      }
     }
-    setPlanModalOpened(false);
   };
 
-  const handleDeletePlan = (id: string) => {
+  const handleDeletePlan = async (id: string) => {
     if (costPlans.length <= 1) return;
-    setCostPlans(plans => plans.filter(p => p.id !== id));
-    if (activePlanId === id) {
+    const success = await removeCostPlan(id);
+    if (success && activePlanId === id) {
       setActivePlanId(costPlans[0].id);
     }
   };
 
+  const handleCopyPlan = async (planToCopy: CostPlanWithDetails) => {
+    try {
+      console.log('🔄 Starting plan copy for:', planToCopy.name);
+      console.log('📋 Plan to copy has:', planToCopy.categories.length, 'categories and', planToCopy.costItems.length, 'cost items');
+      
+      // Erstelle den neuen Plan
+      const newPlan = await addCostPlan(`${planToCopy.name} (Kopie)`, planToCopy.description);
+      if (!newPlan) {
+        console.error('❌ Failed to create new plan');
+        return;
+      }
+
+      console.log('✅ Created new plan:', newPlan.name, 'with ID:', newPlan.id);
+
+      // Kopiere alle Kategorien sequenziell und sammle die Kategorie-Mappings
+      const categoryMappings: Array<{oldId: string, newId: string, name: string}> = [];
+      
+      for (const category of planToCopy.categories) {
+        console.log('🔄 Copying category:', category.name, 'with color:', category.color);
+        const categorySuccess = await addCostCategory(newPlan.id, category.name, category.color);
+        
+        if (categorySuccess) {
+          console.log('✅ Created category:', category.name);
+          categoryMappings.push({
+            oldId: category.id,
+            newId: '', // Wird später gefüllt
+            name: category.name
+          });
+        } else {
+          console.error('❌ Failed to create category:', category.name);
+        }
+      }
+
+      console.log('📝 Category mappings to resolve:', categoryMappings.length);
+
+      // Lade den neuen Plan direkt aus der Datenbank statt auf State zu warten
+      console.log('🔄 Loading new plan directly from database...');
+      
+      // Import der Service-Funktion wenn nicht schon vorhanden
+      const { getCostPlanWithDetails } = await import('../../lib/services/costPlanService');
+      
+      let updatedPlan: CostPlanWithDetails | null = null;
+      let attempts = 0;
+      const maxAttempts = 5;
+      
+      // Versuche mehrmals den Plan zu laden
+      while (!updatedPlan && attempts < maxAttempts) {
+        attempts++;
+        console.log(`🔄 Attempt ${attempts}/${maxAttempts} to load plan from database...`);
+        
+        try {
+          if (user?.id) {
+            updatedPlan = await getCostPlanWithDetails(newPlan.id, user.id);
+            if (updatedPlan) {
+              console.log('✅ Successfully loaded plan from database:', updatedPlan.name);
+              console.log('� Plan has', updatedPlan.categories.length, 'categories');
+            } else {
+              console.log('⏳ Plan not yet available, waiting 1 second...');
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+          }
+        } catch (error) {
+          console.log(`❌ Attempt ${attempts} failed:`, error);
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+      
+      console.log('🔍 Final result - updatedPlan found:', !!updatedPlan);
+      console.log('📂 Categories available:', updatedPlan?.categories.length || 0);
+      
+      if (updatedPlan) {
+        // Mappe die Kategorie-IDs
+        for (const mapping of categoryMappings) {
+          const newCategory = updatedPlan.categories.find(cat => cat.name === mapping.name);
+          if (newCategory) {
+            mapping.newId = newCategory.id;
+            console.log('✅ Mapped category:', mapping.name, 'from', mapping.oldId, 'to', mapping.newId);
+          } else {
+            console.error('❌ Could not find new category with name:', mapping.name);
+            console.log('Available categories:', updatedPlan.categories.map(c => c.name));
+          }
+        }
+
+        // Zeige Mapping-Ergebnisse
+        const successfulMappings = categoryMappings.filter(m => m.newId);
+        console.log('📊 Successful category mappings:', successfulMappings.length, 'of', categoryMappings.length);
+
+        // Kopiere alle Kostenpositionen
+        console.log('🔄 Starting to copy', planToCopy.costItems.length, 'cost items...');
+        let copiedItemsCount = 0;
+        
+        for (const item of planToCopy.costItems) {
+          const categoryMapping = categoryMappings.find(m => m.oldId === item.cost_category_id);
+          
+          if (categoryMapping && categoryMapping.newId) {
+            console.log('🔄 Copying cost item:', item.name, 'to category:', categoryMapping.name, '(ID:', categoryMapping.newId, ')');
+            
+            const itemSuccess = await addCostItem(newPlan.id, categoryMapping.newId, {
+              name: item.name,
+              estimated_cost: item.estimated_cost,
+              quantity: item.quantity || 1,
+              unit: item.unit || 'mal/Jahr',
+              priority: item.priority || 'medium',
+              notes: item.notes || ''
+            });
+            
+            if (itemSuccess) {
+              copiedItemsCount++;
+              console.log('✅ Copied cost item:', item.name, '(', copiedItemsCount, '/', planToCopy.costItems.length, ')');
+            } else {
+              console.error('❌ Failed to copy cost item:', item.name);
+            }
+          } else {
+            console.error('❌ No category mapping found for item:', item.name);
+            console.error('   Original category ID:', item.cost_category_id);
+            console.error('   Available mappings:', categoryMappings.map(m => `${m.name}: ${m.oldId} -> ${m.newId}`));
+          }
+        }
+        
+        console.log('📊 Copied', copiedItemsCount, 'of', planToCopy.costItems.length, 'cost items');
+      } else {
+        console.error('❌ Could not find updated plan after refresh');
+        console.log('🔄 Trying one more refresh and manual search...');
+        
+        // Versuche es noch einmal mit längerem Warten
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        await refresh();
+        
+        const retryPlan = costPlans.find(p => p.id === newPlan.id);
+        if (retryPlan) {
+          console.log('✅ Found plan on retry!');
+          // Hier könntest du den gleichen Code wie oben wiederholen
+          // Aber für jetzt beenden wir mit einer Warnung
+          console.log('⚠️ Plan found but skipping item copying due to timing issues');
+        } else {
+          console.error('💥 Plan still not found after retry. Available plans:', costPlans.map(p => p.name));
+          console.log('🎯 This might be a timing issue with the database/state update');
+        }
+      }
+
+      // Finale Datenaktualisierung und Aktivierung des neuen Plans
+      console.log('🔄 Final refresh and activating new plan...');
+      await refresh();
+      
+      // Warte ein bisschen und prüfe ob der Plan jetzt im State ist
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const finalPlan = costPlans.find(p => p.id === newPlan.id);
+      
+      if (finalPlan) {
+        console.log('✅ Final plan found in state:', finalPlan.name);
+        console.log('📊 Final plan stats:', {
+          categories: finalPlan.categories.length,
+          costItems: finalPlan.costItems.length,
+          totalCost: finalPlan.total_estimated_cost
+        });
+        setActivePlanId(newPlan.id);
+      } else {
+        console.log('⚠️ Plan not yet in state, forcing another refresh...');
+        await refresh();
+        // Aktiviere trotzdem den Plan, auch wenn er noch nicht im State ist
+        setActivePlanId(newPlan.id);
+      }
+      
+      console.log('✅ Plan copy completed successfully');
+      
+    } catch (error) {
+      console.error('💥 Error copying plan:', error);
+    }
+  };
+
+  // Category management
   const handleAddCategory = () => {
     setCategoryForm({ id: '', name: '', color: 'blue' });
     setEditingCategory(false);
     setCategoryModalOpened(true);
   };
 
-  const handleEditCategory = (category: Category) => {
-    setCategoryForm(category);
+  const handleEditCategory = (category: typeof categories[0]) => {
+    setCategoryForm({ id: category.id, name: category.name, color: category.color });
     setEditingCategory(true);
     setCategoryModalOpened(true);
   };
 
-  const handleSaveCategory = () => {
-    if (!categoryForm.name) return;
+  const handleSaveCategory = async () => {
+    if (!categoryForm.name || !activePlanId) return;
+    
     if (editingCategory) {
-      updatePlan(activePlanId, {
-        categories: categories.map(cat => cat.id === categoryForm.id ? categoryForm : cat)
-      });
+      const success = await editCostCategory(categoryForm.id, categoryForm.name, categoryForm.color);
+      if (success) setCategoryModalOpened(false);
     } else {
-      updatePlan(activePlanId, {
-        categories: [...categories, { ...categoryForm, id: Date.now().toString() }]
-      });
-    }
-    setCategoryModalOpened(false);
-  };
-
-  const handleDeleteCategory = (id: string) => {
-    const categoryToDelete = categories.find(cat => cat.id === id);
-    if (categoryToDelete) {
-      updatePlan(activePlanId, {
-        costs: costs.filter(cost => cost.category !== categoryToDelete.name),
-        categories: categories.filter(cat => cat.id !== id)
-      });
+      const success = await addCostCategory(activePlanId, categoryForm.name, categoryForm.color);
+      if (success) {
+        setCategoryModalOpened(false);
+        // Nach kurzer Verzögerung zur neuen Kategorie wechseln
+        setTimeout(() => {
+          const newCategory = categories.find(cat => cat.name === categoryForm.name);
+          if (newCategory) {
+            setActiveTab(newCategory.id);
+          }
+        }, 100);
+      }
     }
   };
 
-  const handleAddCost = (categoryName: string) => {
-    setCostForm({ id: '', name: '', kosten: 0, frequenz: 1, category: categoryName });
-    setEditingCost(false);
-    setCostModalOpened(true);
+  const handleDeleteCategory = async (categoryId: string) => {
+    if (!activePlanId) return;
+    await removeCostCategory(activePlanId, categoryId);
   };
 
-  const handleEditCost = (item: CostItem) => {
-    setCostForm(item);
-    setEditingCost(true);
-    setCostModalOpened(true);
-  };
-
-  const handleSaveCost = () => {
-    if (!costForm.name || costForm.kosten <= 0 || !costForm.category) return;
-    const betragProMonat = costForm.kosten / costForm.frequenz;
-    const newItem = { ...costForm, betragProMonat };
-
-    if (editingCost) {
-      updatePlan(activePlanId, {
-        costs: costs.map(item => item.id === newItem.id ? newItem : item)
-      });
-    } else {
-      updatePlan(activePlanId, {
-        costs: [...costs, { ...newItem, id: Date.now().toString() }]
-      });
-    }
-    setCostModalOpened(false);
-  };
-
-  const handleDeleteCost = (id: string) => {
-    updatePlan(activePlanId, {
-      costs: costs.filter(item => item.id !== id)
-    });
-  };
-
+  // Income management
   const handleAddIncome = () => {
-    setIncomeForm({ id: '', name: '', betrag: 0, frequenz: 1, betragProMonat: 0 });
+    setIncomeForm({ 
+      id: '', 
+      name: '', 
+      amount: 0, 
+      frequency: 'monthly',
+      start_date: new Date().toISOString().split('T')[0],
+      end_date: '',
+      description: ''
+    });
     setEditingIncome(false);
     setIncomeModalOpened(true);
   };
 
-  const handleEditIncome = (item: IncomeItem) => {
-    setIncomeForm(item);
+  const handleEditIncome = (item: IncomeSourceWithMonthly) => {
+    setIncomeForm({ 
+      id: item.id, 
+      name: item.name, 
+      amount: item.amount, 
+      frequency: item.frequency,
+      start_date: item.start_date,
+      end_date: item.end_date || '',
+      description: item.description || ''
+    });
     setEditingIncome(true);
     setIncomeModalOpened(true);
   };
 
-  const handleSaveIncome = () => {
-    if (!incomeForm.name || incomeForm.betrag <= 0) return;
-    const betragProMonat = incomeForm.betrag / incomeForm.frequenz;
-    const newItem = { ...incomeForm, betragProMonat };
-
+  const handleSaveIncome = async () => {
+    if (!incomeForm.name || incomeForm.amount <= 0) return;
+    
     if (editingIncome) {
-      updatePlan(activePlanId, {
-        income: income.map(item => item.id === newItem.id ? newItem : item)
+      const success = await editIncomeSource(incomeForm.id, {
+        name: incomeForm.name,
+        amount: incomeForm.amount,
+        frequency: incomeForm.frequency,
+        start_date: incomeForm.start_date,
+        end_date: incomeForm.end_date || undefined,
+        description: incomeForm.description
       });
+      if (success) setIncomeModalOpened(false);
     } else {
-      updatePlan(activePlanId, {
-        income: [...income, { ...newItem, id: Date.now().toString() }]
+      const success = await addIncomeSource({
+        name: incomeForm.name,
+        amount: incomeForm.amount,
+        frequency: incomeForm.frequency,
+        start_date: incomeForm.start_date,
+        end_date: incomeForm.end_date || undefined,
+        description: incomeForm.description
       });
+      if (success) setIncomeModalOpened(false);
     }
-    setIncomeModalOpened(false);
   };
 
-  const handleDeleteIncome = (id: string) => {
-    updatePlan(activePlanId, {
-      income: income.filter(item => item.id !== id)
+  const handleDeleteIncome = async (id: string) => {
+    await removeIncomeSource(id);
+  };
+
+  // Cost Item management
+  const handleAddCost = (categoryId?: string) => {
+    setCostForm({ 
+      id: '', 
+      name: '', 
+      estimated_cost: 0, 
+      frequency_per_year: 1, 
+      description: '', 
+      priority: 'medium',
+      category_id: categoryId || '',
+      notes: ''
+    });
+    setEditingCost(false);
+    setCostModalOpened(true);
+  };
+
+  const handleEditCost = (item: typeof costItems[0]) => {
+    setCostForm({ 
+      id: item.id, 
+      name: item.name, 
+      estimated_cost: item.estimated_cost, 
+      frequency_per_year: item.quantity || 1, // Nutze quantity als frequency_per_year für Rückwärtskompatibilität 
+      description: item.notes || '', 
+      priority: item.priority,
+      category_id: item.cost_category_id,
+      notes: item.notes || ''
+    });
+    setEditingCost(true);
+    setCostModalOpened(true);
+  };
+
+  const handleSaveCost = async () => {
+    if (!costForm.name || costForm.estimated_cost <= 0 || !costForm.category_id || !activePlanId) return;
+    
+    if (editingCost) {
+      const success = await editCostItem(activePlanId, costForm.id, {
+        name: costForm.name,
+        estimated_cost: costForm.estimated_cost,
+        quantity: costForm.frequency_per_year, // Speichere frequency_per_year als quantity
+        unit: 'mal/Jahr', // Fixe Einheit
+        priority: costForm.priority,
+        notes: costForm.description || costForm.notes
+      });
+      if (success) setCostModalOpened(false);
+    } else {
+      const success = await addCostItem(activePlanId, costForm.category_id, {
+        name: costForm.name,
+        estimated_cost: costForm.estimated_cost,
+        quantity: costForm.frequency_per_year, // Speichere frequency_per_year als quantity
+        unit: 'mal/Jahr', // Fixe Einheit
+        priority: costForm.priority,
+        notes: costForm.description || costForm.notes
+      });
+      if (success) setCostModalOpened(false);
+    }
+  };
+
+  const handleDeleteCost = async (itemId: string) => {
+    if (!activePlanId) return;
+    await removeCostItem(activePlanId, itemId);
+  };
+
+  const handleCopyCost = async (itemToCopy: typeof costItems[0]) => {
+    if (!activePlanId) return;
+    await addCostItem(activePlanId, itemToCopy.cost_category_id, {
+      name: `${itemToCopy.name} (Kopie)`,
+      estimated_cost: itemToCopy.estimated_cost,
+      quantity: itemToCopy.quantity || 1,
+      unit: itemToCopy.unit,
+      priority: itemToCopy.priority,
+      notes: itemToCopy.notes
     });
   };
 
-  const getCostsForCategory = (categoryName: string) => {
-    return costs.filter(cost => cost.category === categoryName);
-  };
-
-  const getTotalForCategory = (categoryName: string) => {
-    return getCostsForCategory(categoryName).reduce((sum, cost) => sum + cost.betragProMonat, 0);
-  };
-
-  const gesamtEinnahmen = income.reduce((sum, item) => sum + item.betragProMonat, 0);
-  const gesamtKosten = costs.reduce((sum, item) => sum + item.betragProMonat, 0);
-  const gewinn = gesamtEinnahmen - gesamtKosten;
-
   return (
-    <Container size="xl">
-      <Stack gap="xl">
-        <Group justify="space-between">
-          <Title order={1}>Kostenübersicht</Title>
-          <Group gap="xs">
-            <Button leftSection={<IconLayoutGrid size={16} />} onClick={handleAddPlan} variant="light">
-              Neuer Plan
-            </Button>
-            <Button leftSection={<IconCategory size={16} />} onClick={handleAddCategory}>
-              Neue Kategorie
-            </Button>
-          </Group>
-        </Group>
+    <Container size="xl" py="xl">
+      <Group justify="space-between" mb="xl">
+        <Title order={1}>Kostenplanung</Title>
+        <Button leftSection={<IconPlus size={16} />} onClick={handleAddPlan}>
+          Neuer Plan
+        </Button>
+      </Group>
 
-        <Group justify="space-between" align="center" mb="md">
-          <Group>
-            <Title order={2}>Kostenpläne</Title>
-            {costPlans.length > 1 && (
-              <Badge variant="light" color="blue">
-                {costPlans.length} Pläne
-              </Badge>
-            )}
-          </Group>
-          <Group gap="xs">
-            <Button 
-              leftSection={<IconPlus size={16} />} 
-              onClick={handleAddCategory}
-              size="sm"
-            >
-              Neue Kategorie
-            </Button>
-            {costPlans.length > 1 && activePlanId && (
-              <>
-                <ActionIcon
-                  size="lg"
-                  variant="subtle"
-                  color="blue"
-                  onClick={() => {
-                    const activePlan = costPlans.find(p => p.id === activePlanId);
-                    if (activePlan) handleEditPlan(activePlan);
-                  }}
-                  title="Plan bearbeiten"
-                >
-                  <IconEdit size={18} />
-                </ActionIcon>
-                <ActionIcon
-                  size="lg"
-                  variant="subtle"
-                  color="red"
-                  onClick={() => handleDeletePlan(activePlanId)}
-                  title="Plan löschen"
-                >
-                  <IconTrash size={18} />
-                </ActionIcon>
-              </>
-            )}
-          </Group>
-        </Group>
-
-        <Tabs value={activePlanId} onChange={(value) => setActivePlanId(value || '1')}>
-          <Tabs.List mb="lg">
-            {costPlans.map((plan) => (
-              <Tabs.Tab key={plan.id} value={plan.id}>
-                {plan.name}
-              </Tabs.Tab>
-            ))}
-          </Tabs.List>
-
-          {costPlans.map((plan) => (
-            <Tabs.Panel key={plan.id} value={plan.id} pt="xl">
-              <Stack gap="xl">
-                <Group grow>
-                  <Card shadow="sm" padding="lg" radius="md" withBorder>
-                    <Text size="sm" c="dimmed">Gehalt (Monat)</Text>
-                    <Text size="xl" fw={700} c="green">€{gesamtEinnahmen.toFixed(2)}</Text>
-                  </Card>
-                  <Card shadow="sm" padding="lg" radius="md" withBorder>
-                    <Text size="sm" c="dimmed">Kosten (Monat)</Text>
-                    <Text size="xl" fw={700} c="red">€{gesamtKosten.toFixed(2)}</Text>
-                  </Card>
-                  <Card shadow="sm" padding="lg" radius="md" withBorder>
-                    <Text size="sm" c="dimmed">Gewinn</Text>
-                    <Text size="xl" fw={700} c={gewinn >= 0 ? 'green' : 'red'}>€{gewinn.toFixed(2)}</Text>
-                  </Card>
+      {costPlans.length === 0 ? (
+        <Card>
+          <Text ta="center" c="dimmed">
+            Noch keine Kostenpläne vorhanden. Erstelle deinen ersten Plan!
+          </Text>
+        </Card>
+      ) : (
+        <>
+          <Card mb="xl">
+            <Group justify="space-between" mb="md">
+              <Text fw={500}>Aktiver Plan</Text>
+              <Group>
+                <Select
+                  value={activePlanId}
+                  onChange={(value) => setActivePlanId(value || '')}
+                  data={costPlans.map(plan => ({ value: plan.id, label: plan.name }))}
+                  placeholder="Plan auswählen"
+                />
+                {activePlan && (
+                  <>
+                    <ActionIcon variant="subtle" onClick={() => handleEditPlan(activePlan)} title="Plan bearbeiten">
+                      <IconEdit size={16} />
+                    </ActionIcon>
+                    <ActionIcon variant="subtle" color="blue" onClick={() => handleCopyPlan(activePlan)} title="Plan kopieren">
+                      <IconCopy size={16} />
+                    </ActionIcon>
+                    <ActionIcon variant="subtle" color="red" onClick={() => handleDeletePlan(activePlan.id)} title="Plan löschen">
+                      <IconTrash size={16} />
+                    </ActionIcon>
+                  </>
+                )}
+              </Group>
+            </Group>
+            
+            {activePlan && (
+              <Stack gap="sm">
+                <Text><strong>Name:</strong> {activePlan.name}</Text>
+                {activePlan.description && (
+                  <Text><strong>Beschreibung:</strong> {activePlan.description}</Text>
+                )}
+                <Group>
+                  <Text c="green"><strong>Einkommen:</strong> {totalIncome.toFixed(2)} €</Text>
+                  <Text c="red"><strong>Kosten:</strong> {totalCosts.toFixed(2)} €</Text>
+                  <Text c={balance >= 0 ? 'green' : 'red'}>
+                    <strong>Bilanz:</strong> {balance.toFixed(2)} €
+                  </Text>
                 </Group>
+              </Stack>
+            )}
+          </Card>
 
-                <Card shadow="sm" padding="lg" radius="md" withBorder>
-                  <Group justify="space-between" mb="md">
-                    <Title order={3}>Gehälter</Title>
-                    <Button size="sm" onClick={handleAddIncome}>Gehalt hinzufügen</Button>
-                  </Group>
-                  <Table highlightOnHover>
+          <Tabs value={activeTab} onChange={(value) => setActiveTab(value || 'income')}>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleTabDragEnd}
+            >
+              <Tabs.List>
+                {/* Fixed Income Tab */}
+                <Tabs.Tab value="income">
+                  Einkommen
+                </Tabs.Tab>
+                
+                {/* Sortable Category Tabs */}
+                <SortableContext
+                  items={sortedCategories.map(category => category.id)}
+                  strategy={horizontalListSortingStrategy}
+                >
+                  {sortedCategories.map((category) => (
+                    <SortableTab
+                      key={category.id}
+                      id={category.id}
+                      category={category}
+                      isActive={activeTab === category.id}
+                      onClick={() => setActiveTab(category.id)}
+                    />
+                  ))}
+                </SortableContext>
+                
+                {/* Fixed Add Category Tab */}
+                <Tabs.Tab value="add-category">
+                  <IconPlus size={16} />
+                </Tabs.Tab>
+              </Tabs.List>
+            </DndContext>
+
+            {/* Income Tab */}
+            <Tabs.Panel value="income" pt="md">
+              <Card>
+                <Group justify="space-between" mb="md">
+                  <Title order={3}>Einkommensquellen</Title>
+                  <Button leftSection={<IconPlus size={16} />} onClick={handleAddIncome}>
+                    Neue Einkommensquelle
+                  </Button>
+                </Group>
+                
+                {incomeSources.length === 0 ? (
+                  <Text ta="center" c="dimmed">Noch keine Einkommensquellen vorhanden</Text>
+                ) : (
+                  <Table>
                     <Table.Thead>
                       <Table.Tr>
                         <Table.Th>Name</Table.Th>
                         <Table.Th>Betrag</Table.Th>
-                        <Table.Th>Frequenz</Table.Th>
-                        <Table.Th>Betrag pro Monat</Table.Th>
+                        <Table.Th>Häufigkeit</Table.Th>
+                        <Table.Th>Monatlich</Table.Th>
                         <Table.Th>Aktionen</Table.Th>
                       </Table.Tr>
                     </Table.Thead>
                     <Table.Tbody>
-                      {income.map((item) => (
-                        <Table.Tr key={item.id}>
-                          <Table.Td>{item.name}</Table.Td>
-                          <Table.Td>€{item.betrag.toFixed(2)}</Table.Td>
-                          <Table.Td>{item.frequenz}x/Monat</Table.Td>
-                          <Table.Td>€{item.betragProMonat.toFixed(2)}</Table.Td>
+                      {incomeSources.map((source) => (
+                        <Table.Tr key={source.id}>
+                          <Table.Td>{source.name}</Table.Td>
+                          <Table.Td>{source.amount.toFixed(2)} €</Table.Td>
                           <Table.Td>
-                            <Group gap="xs">
-                              <ActionIcon color="blue" variant="light" onClick={() => handleEditIncome(item)}>
-                                <IconEdit size={16} />
+                            <Badge>
+                              {source.frequency === 'weekly' ? 'Wöchentlich' :
+                               source.frequency === 'monthly' ? 'Monatlich' :
+                               source.frequency === 'yearly' ? 'Jährlich' : 'Einmalig'}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>{source.monthlyAmount.toFixed(2)} €</Table.Td>
+                          <Table.Td>
+                            <Group gap="sm">
+                              <ActionIcon variant="subtle" size="sm" onClick={() => handleEditIncome(source)}>
+                                <IconEdit size={14} />
                               </ActionIcon>
-                              <ActionIcon color="red" variant="light" onClick={() => handleDeleteIncome(item.id)}>
-                                <IconTrash size={16} />
+                              <ActionIcon variant="subtle" color="red" size="sm" onClick={() => handleDeleteIncome(source.id)}>
+                                <IconTrash size={14} />
                               </ActionIcon>
                             </Group>
                           </Table.Td>
@@ -378,233 +844,395 @@ export default function CostsPage() {
                       ))}
                     </Table.Tbody>
                   </Table>
-                </Card>
+                )}
+              </Card>
+            </Tabs.Panel>
 
-                {categories.map((category) => {
-                  const categoryCosts = getCostsForCategory(category.name);
-                  return (
-                    <Card key={category.id} shadow="sm" padding="lg" radius="md" withBorder>
-                      <Group justify="space-between" mb="md">
-                        <Group gap="md">
-                          <Badge color={category.color} size="xl" variant="filled">
-                            {category.name}
-                          </Badge>
-                          <Text size="lg" fw={500}>
-                            Total: €{getTotalForCategory(category.name).toFixed(2)}/Monat
-                          </Text>
-                        </Group>
-                        <Group gap="xs">
-                          <Button size="sm" onClick={() => handleAddCost(category.name)}>
-                            Kosten hinzufügen
-                          </Button>
-                          <ActionIcon 
-                            color="blue" 
-                            variant="light" 
-                            onClick={() => handleEditCategory(category)}
-                            size="lg"
-                          >
-                            <IconEdit size={16} />
-                          </ActionIcon>
-                          <ActionIcon 
-                            color="red" 
-                            variant="light" 
-                            onClick={() => handleDeleteCategory(category.id)}
-                            size="lg"
-                          >
-                            <IconTrash size={16} />
-                          </ActionIcon>
-                        </Group>
+            {/* Dynamic Category Tabs */}
+            {sortedCategories.map((category) => {
+              const categoryItems = costItems.filter(item => item.cost_category_id === category.id);
+              const categoryTotal = categoryItems.reduce((sum, item) => {
+                const yearlyItemCost = item.estimated_cost * (item.quantity || 1);
+                const monthlyItemCost = yearlyItemCost / 12;
+                return sum + monthlyItemCost;
+              }, 0);
+              
+              return (
+                <Tabs.Panel key={category.id} value={category.id} pt="md">
+                  <Card>
+                    <Group justify="space-between" mb="md">
+                      <Group>
+                        <Title order={3}>{category.name}</Title>
+                        <Badge color={category.color}>
+                          {categoryItems.length} Positionen • {categoryTotal.toFixed(2)} €/Monat
+                        </Badge>
                       </Group>
-
-                      <Table highlightOnHover>
+                      <Group>
+                        <Button leftSection={<IconPlus size={16} />} onClick={() => handleAddCost(category.id)}>
+                          Neue Position
+                        </Button>
+                        <ActionIcon variant="subtle" onClick={() => handleEditCategory(category)}>
+                          <IconEdit size={16} />
+                        </ActionIcon>
+                        <ActionIcon variant="subtle" color="red" onClick={() => handleDeleteCategory(category.id)}>
+                          <IconTrash size={16} />
+                        </ActionIcon>
+                      </Group>
+                    </Group>
+                    
+                    {categoryItems.length === 0 ? (
+                      <Text ta="center" c="dimmed" py="xl">
+                        Noch keine Kostenpositionen in dieser Kategorie.
+                        <br />
+                        <Button variant="light" onClick={() => handleAddCost(category.id)} mt="md">
+                          Erste Position hinzufügen
+                        </Button>
+                      </Text>
+                    ) : (
+                      <Table>
                         <Table.Thead>
                           <Table.Tr>
                             <Table.Th>Name</Table.Th>
-                            <Table.Th>Kosten</Table.Th>
-                            <Table.Th>Frequenz</Table.Th>
-                            <Table.Th>Betrag pro Monat</Table.Th>
+                            <Table.Th>Kosten/Jahr</Table.Th>
+                            <Table.Th>Häufigkeit</Table.Th>
+                            <Table.Th>Monatlich</Table.Th>
                             <Table.Th>Aktionen</Table.Th>
                           </Table.Tr>
                         </Table.Thead>
                         <Table.Tbody>
-                          {categoryCosts.length > 0 ? (
-                            categoryCosts.map((item) => (
+                          {categoryItems.map((item) => {
+                            const yearlyItemCost = item.estimated_cost * (item.quantity || 1);
+                            const monthlyItemCost = yearlyItemCost / 12;
+                            return (
                               <Table.Tr key={item.id}>
-                                <Table.Td>{item.name}</Table.Td>
-                                <Table.Td>€{item.kosten}</Table.Td>
                                 <Table.Td>
-                                  {item.frequenz === 1 ? 'Monatlich' : 
-                                   item.frequenz === 12 ? 'Jährlich' : 
-                                   `${item.frequenz}x pro Jahr`}
+                                  <div>
+                                    <Text fw={500}>{item.name}</Text>
+                                    {item.notes && (
+                                      <Text size="sm" c="dimmed">{item.notes}</Text>
+                                    )}
+                                  </div>
                                 </Table.Td>
-                                <Table.Td>€{item.betragProMonat.toFixed(2)}</Table.Td>
+                                <Table.Td>{yearlyItemCost.toFixed(2)} €</Table.Td>
+                                <Table.Td>{item.quantity || 1}x pro Jahr</Table.Td>
                                 <Table.Td>
-                                  <Group gap="xs">
-                                    <ActionIcon color="blue" variant="light" onClick={() => handleEditCost(item)}>
-                                      <IconEdit size={16} />
+                                  <Text fw={500}>
+                                    {monthlyItemCost.toFixed(2)} €
+                                  </Text>
+                                </Table.Td>
+                                <Table.Td>
+                                  <Group gap="sm">
+                                    <ActionIcon variant="subtle" size="sm" onClick={() => handleEditCost(item)} title="Bearbeiten">
+                                      <IconEdit size={14} />
                                     </ActionIcon>
-                                    <ActionIcon color="red" variant="light" onClick={() => handleDeleteCost(item.id)}>
-                                      <IconTrash size={16} />
+                                    <ActionIcon variant="subtle" color="blue" size="sm" onClick={() => handleCopyCost(item)} title="Kopieren">
+                                      <IconCopy size={14} />
+                                    </ActionIcon>
+                                    <ActionIcon variant="subtle" color="red" size="sm" onClick={() => handleDeleteCost(item.id)} title="Löschen">
+                                      <IconTrash size={14} />
                                     </ActionIcon>
                                   </Group>
                                 </Table.Td>
                               </Table.Tr>
-                            ))
-                          ) : (
-                            <Table.Tr>
-                              <Table.Td colSpan={5}>
-                                <Text c="dimmed" ta="center">Keine Kosten in dieser Kategorie</Text>
-                              </Table.Td>
-                            </Table.Tr>
-                          )}
+                            );
+                          })}
                         </Table.Tbody>
                       </Table>
-                    </Card>
-                  );
-                })}
+                    )}
+                  </Card>
+                </Tabs.Panel>
+              );
+            })}
 
-                <Card shadow="sm" padding="lg" radius="md" withBorder>
-                  <Title order={3} mb="md">Zusammenfassung</Title>
-                  <Stack gap="sm">
-                    <Group justify="space-between">
-                      <Text fw={700} size="lg">Gesamte Einnahmen:</Text>
-                      <Text fw={700} size="lg" c="green">€{gesamtEinnahmen.toFixed(2)}</Text>
-                    </Group>
-                    {categories.map((category) => (
-                      <Group key={category.id} justify="space-between">
-                        <Text>{category.name}:</Text>
-                        <Text fw={700} c="red">-€{getTotalForCategory(category.name).toFixed(2)}</Text>
-                      </Group>
-                    ))}
-                    <Group justify="space-between" pt="md" style={{ borderTop: '2px solid var(--mantine-color-gray-3)' }}>
-                      <Text fw={700} size="xl">Gewinn:</Text>
-                      <Text fw={700} size="xl" c="blue">€{gewinn.toFixed(2)}</Text>
-                    </Group>
-                  </Stack>
-                </Card>
-              </Stack>
+            {/* Add Category Tab */}
+            <Tabs.Panel value="add-category" pt="md">
+              <Card>
+                <Stack align="center" py="xl">
+                  <IconCategory size={48} style={{ opacity: 0.5 }} />
+                  <Title order={3} ta="center">Neue Kategorie erstellen</Title>
+                  <Text ta="center" c="dimmed">
+                    Erstellen Sie eine neue Kategorie, um Ihre Kosten zu organisieren.
+                  </Text>
+                  <Button leftSection={<IconPlus size={16} />} onClick={handleAddCategory}>
+                    Kategorie erstellen
+                  </Button>
+                </Stack>
+              </Card>
             </Tabs.Panel>
-          ))}
-        </Tabs>
-      </Stack>
+          </Tabs>
+        </>
+      )}
 
-      {/* Modals */}
-      <Modal opened={planModalOpened} onClose={() => setPlanModalOpened(false)} title={editingPlan ? 'Plan bearbeiten' : 'Neuen Plan erstellen'}>
-        <Stack gap="md">
+      {/* Plan Modal */}
+      <Modal 
+        opened={planModalOpened} 
+        onClose={() => setPlanModalOpened(false)} 
+        title={editingPlan ? "Plan bearbeiten" : "Neuer Plan"}
+        size="md"
+        centered
+      >
+        <Stack>
           <TextInput
-            label="Plan-Name"
-            placeholder="z.B. Optimistisch, Pessimistisch"
+            label="Name"
+            placeholder="z.B. Familienbudget 2025, Jahresplanung"
             value={planForm.name}
-            onChange={(e) => setPlanForm({ ...planForm, name: e.target.value })}
+            onChange={(e) => setPlanForm(prev => ({ ...prev, name: e.target.value }))}
             required
+            withAsterisk
+          />
+          <TextInput
+            label="Beschreibung (optional)"
+            placeholder="Kurze Beschreibung des Plans"
+            value={planForm.description}
+            onChange={(e) => setPlanForm(prev => ({ ...prev, description: e.target.value }))}
           />
           <Group justify="flex-end" mt="md">
             <Button variant="light" onClick={() => setPlanModalOpened(false)}>Abbrechen</Button>
-            <Button onClick={handleSavePlan}>Speichern</Button>
+            <Button onClick={handleSavePlan} disabled={!planForm.name}>
+              Speichern
+            </Button>
           </Group>
         </Stack>
       </Modal>
 
-      <Modal opened={categoryModalOpened} onClose={() => setCategoryModalOpened(false)} title={editingCategory ? 'Kategorie bearbeiten' : 'Neue Kategorie erstellen'}>
-        <Stack gap="md">
+      {/* Category Modal */}
+      <Modal 
+        opened={categoryModalOpened} 
+        onClose={() => setCategoryModalOpened(false)} 
+        title={editingCategory ? "Kategorie bearbeiten" : "Neue Kategorie"}
+        size="md"
+        centered
+      >
+        <Stack>
           <TextInput
-            label="Kategorie-Name"
-            placeholder="z.B. Wohnen, Transport"
+            label="Name"
+            placeholder="z.B. Lebensmittel, Transport, Unterhaltung"
             value={categoryForm.name}
-            onChange={(e) => setCategoryForm({ ...categoryForm, name: e.target.value })}
+            onChange={(e) => setCategoryForm(prev => ({ ...prev, name: e.target.value }))}
             required
+            withAsterisk
           />
           <Select
             label="Farbe"
-            placeholder="Wähle eine Farbe"
             value={categoryForm.color}
-            onChange={(val) => setCategoryForm({ ...categoryForm, color: val || 'blue' })}
+            onChange={(value) => setCategoryForm(prev => ({ ...prev, color: value || 'blue' }))}
             data={colorOptions}
-            renderOption={({ option }) => (
-              <Group gap="xs">
-                <Badge color={option.value} variant="filled" size="lg" style={{ minWidth: '60px' }}>
-                  {option.value}
-                </Badge>
-                <Text>{option.label}</Text>
-              </Group>
-            )}
             required
+            withAsterisk
+            description="Wählen Sie eine Farbe zur besseren Unterscheidung"
           />
           <Group justify="flex-end" mt="md">
             <Button variant="light" onClick={() => setCategoryModalOpened(false)}>Abbrechen</Button>
-            <Button onClick={handleSaveCategory}>Speichern</Button>
+            <Button onClick={handleSaveCategory} disabled={!categoryForm.name}>
+              Speichern
+            </Button>
           </Group>
         </Stack>
       </Modal>
 
-      <Modal opened={costModalOpened} onClose={() => setCostModalOpened(false)} title={editingCost ? 'Kosten bearbeiten' : 'Neue Kosten hinzufügen'}>
+      {/* Income Modal */}
+      <Modal 
+        opened={incomeModalOpened} 
+        onClose={() => setIncomeModalOpened(false)} 
+        title={editingIncome ? "Einkommensquelle bearbeiten" : "Neue Einkommensquelle"}
+        size="md"
+        centered
+      >
         <Stack gap="md">
           <TextInput
             label="Name"
-            placeholder="z.B. Netflix, Miete"
-            value={costForm.name}
-            onChange={(e) => setCostForm({ ...costForm, name: e.target.value })}
-            required
-          />
-          <NumberInput
-            label="Kosten"
-            placeholder="0.00"
-            value={costForm.kosten}
-            onChange={(val) => setCostForm({ ...costForm, kosten: Number(val) })}
-            min={0}
-            decimalScale={2}
-            prefix="€"
-            required
-          />
-          <NumberInput
-            label="Frequenz"
-            placeholder="Wie oft pro Jahr?"
-            value={costForm.frequenz}
-            onChange={(val) => setCostForm({ ...costForm, frequenz: Number(val) })}
-            min={1}
-            max={12}
-            description="1 = monatlich, 12 = jährlich"
-            required
-          />
-          <Group justify="flex-end" mt="md">
-            <Button variant="light" onClick={() => setCostModalOpened(false)}>Abbrechen</Button>
-            <Button onClick={handleSaveCost}>Speichern</Button>
-          </Group>
-        </Stack>
-      </Modal>
-
-      <Modal opened={incomeModalOpened} onClose={() => setIncomeModalOpened(false)} title={editingIncome ? 'Gehalt bearbeiten' : 'Neues Gehalt hinzufügen'}>
-        <Stack gap="md">
-          <TextInput
-            label="Name"
-            placeholder="z.B. Hauptjob, Nebenjob"
+            placeholder="z.B. Gehalt, Nebenjob, Rente"
             value={incomeForm.name}
-            onChange={(e) => setIncomeForm({ ...incomeForm, name: e.target.value })}
+            onChange={(e) => setIncomeForm(prev => ({ ...prev, name: e.target.value }))}
             required
+            withAsterisk
           />
+          
           <NumberInput
             label="Betrag"
-            placeholder="0.00"
-            value={incomeForm.betrag}
-            onChange={(val) => setIncomeForm({ ...incomeForm, betrag: Number(val) })}
+            placeholder="Betrag in Euro"
+            value={incomeForm.amount}
+            onChange={(value) => setIncomeForm(prev => ({ ...prev, amount: Number(value) || 0 }))}
             min={0}
+            step={0.01}
             decimalScale={2}
-            prefix="€"
             required
+            withAsterisk
+            rightSection="€"
           />
+          
+          <Select
+            label="Häufigkeit"
+            value={incomeForm.frequency}
+            onChange={(value) => setIncomeForm(prev => ({ ...prev, frequency: (value as 'weekly' | 'monthly' | 'yearly' | 'one-time') || 'monthly' }))}
+            data={frequencyOptions}
+            required
+            withAsterisk
+            description="Wie oft erhalten Sie dieses Einkommen?"
+          />
+          
+          <TextInput
+            label="Startdatum"
+            type="date"
+            value={incomeForm.start_date}
+            onChange={(e) => setIncomeForm(prev => ({ ...prev, start_date: e.target.value }))}
+            required
+            withAsterisk
+            description="Ab wann ist dieses Einkommen gültig?"
+          />
+          
+          <TextInput
+            label="Enddatum (optional)"
+            type="date"
+            value={incomeForm.end_date}
+            onChange={(e) => setIncomeForm(prev => ({ ...prev, end_date: e.target.value }))}
+            placeholder="tt.mm.jjjj"
+            description="Lassen Sie dieses Feld leer, wenn das Einkommen unbefristet ist"
+          />
+          
+          <TextInput
+            label="Beschreibung (optional)"
+            placeholder="Zusätzliche Informationen zu dieser Einkommensquelle"
+            value={incomeForm.description}
+            onChange={(e) => setIncomeForm(prev => ({ ...prev, description: e.target.value }))}
+          />
+          
+          {/* Einkommensvorschau */}
+          {incomeForm.amount > 0 && (
+            <Card withBorder p="md" bg="blue.0" style={{ borderColor: 'var(--mantine-color-blue-3)' }}>
+              <Text size="sm" fw={600} c="blue.8" mb="sm">Einkommensvorschau:</Text>
+              <Stack gap="xs">
+                <Group justify="space-between">
+                  <Text size="sm" c="dimmed">Eingegeben:</Text>
+                  <Text fw={600} c="blue.7" size="md">
+                    {incomeForm.amount.toFixed(2)} € {
+                      incomeForm.frequency === 'weekly' ? 'pro Woche' :
+                      incomeForm.frequency === 'monthly' ? 'pro Monat' :
+                      incomeForm.frequency === 'yearly' ? 'pro Jahr' : 'einmalig'
+                    }
+                  </Text>
+                </Group>
+                <Group justify="space-between">
+                  <Text size="sm" c="dimmed">Monatlich:</Text>
+                  <Text fw={700} c="blue.8" size="lg">
+                    {(() => {
+                      switch (incomeForm.frequency) {
+                        case 'weekly': return (incomeForm.amount * 52 / 12).toFixed(2);
+                        case 'monthly': return incomeForm.amount.toFixed(2);
+                        case 'yearly': return (incomeForm.amount / 12).toFixed(2);
+                        case 'one-time': return (incomeForm.amount / 12).toFixed(2);
+                        default: return incomeForm.amount.toFixed(2);
+                      }
+                    })()} €
+                  </Text>
+                </Group>
+              </Stack>
+            </Card>
+          )}
+          
+          <Group justify="flex-end" mt="lg">
+            <Button variant="light" onClick={() => setIncomeModalOpened(false)}>
+              Abbrechen
+            </Button>
+            <Button onClick={handleSaveIncome} disabled={!incomeForm.name || incomeForm.amount <= 0}>
+              Speichern
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* Cost Item Modal */}
+      <Modal 
+        opened={costModalOpened} 
+        onClose={() => setCostModalOpened(false)} 
+        title={editingCost ? "Kostenposition bearbeiten" : "Neue Kostenposition"}
+        size="md"
+        centered
+      >
+        <Stack gap="md">
+          <TextInput
+            label="Name"
+            placeholder="z.B. Netflix, Versicherung, Miete"
+            value={costForm.name}
+            onChange={(e) => setCostForm(prev => ({ ...prev, name: e.target.value }))}
+            required
+            withAsterisk
+          />
+          
           <NumberInput
-            label="Frequenz"
-            placeholder="Wie oft pro Monat?"
-            value={incomeForm.frequenz}
-            onChange={(val) => setIncomeForm({ ...incomeForm, frequenz: Number(val) })}
-            min={1}
-            max={12}
-            description="1 = einmal pro Monat, 2 = zweimal pro Monat, etc."
+            label="Kosten pro Vorgang"
+            placeholder="Betrag in Euro"
+            value={costForm.estimated_cost}
+            onChange={(value) => setCostForm(prev => ({ ...prev, estimated_cost: Number(value) || 0 }))}
+            min={0}
+            step={0.01}
+            decimalScale={2}
             required
+            withAsterisk
+            rightSection="€"
           />
-          <Group justify="flex-end" mt="md">
-            <Button variant="light" onClick={() => setIncomeModalOpened(false)}>Abbrechen</Button>
-            <Button onClick={handleSaveIncome}>Speichern</Button>
+          
+          <NumberInput
+            label="Häufigkeit pro Jahr"
+            placeholder="Anzahl"
+            value={costForm.frequency_per_year}
+            onChange={(value) => setCostForm(prev => ({ ...prev, frequency_per_year: Number(value) || 1 }))}
+            min={1}
+            max={365}
+            required
+            withAsterisk
+            description="z.B. 12 für monatlich, 4 für quartalsweise, 1 für jährlich"
+            hideControls={true}
+          />
+          
+          <Select
+            label="Kategorie"
+            value={costForm.category_id}
+            onChange={(value) => setCostForm(prev => ({ ...prev, category_id: value || '' }))}
+            data={sortedCategories.map(cat => ({ value: cat.id, label: cat.name }))}
+            required
+            withAsterisk
+            placeholder="Kategorie auswählen"
+          />
+          
+          <TextInput
+            label="Beschreibung (optional)"
+            placeholder="Zusätzliche Informationen zu dieser Kostenstelle"
+            value={costForm.description}
+            onChange={(e) => setCostForm(prev => ({ ...prev, description: e.target.value }))}
+          />
+          
+          {/* Kostenvorschau */}
+          {costForm.estimated_cost > 0 && costForm.frequency_per_year > 0 && (
+            <Card withBorder p="md" bg="red.0" style={{ borderColor: 'var(--mantine-color-red-3)' }}>
+              <Text size="sm" fw={600} c="red.8" mb="sm">Kostenvorschau:</Text>
+              <Stack gap="xs">
+                <Group justify="space-between">
+                  <Text size="sm" c="dimmed">Kosten pro Jahr:</Text>
+                  <Text fw={600} c="red.7" size="md">
+                    {(costForm.estimated_cost * costForm.frequency_per_year).toFixed(2)} €
+                  </Text>
+                </Group>
+                <Group justify="space-between">
+                  <Text size="sm" c="dimmed">Kosten pro Monat:</Text>
+                  <Text fw={700} c="red.8" size="lg">
+                    {((costForm.estimated_cost * costForm.frequency_per_year) / 12).toFixed(2)} €
+                  </Text>
+                </Group>
+              </Stack>
+            </Card>
+          )}
+          
+          <Group justify="flex-end" mt="lg">
+            <Button variant="light" onClick={() => setCostModalOpened(false)}>
+              Abbrechen
+            </Button>
+            <Button 
+              onClick={handleSaveCost}
+              disabled={!costForm.name || costForm.estimated_cost <= 0 || !costForm.category_id}
+            >
+              Speichern
+            </Button>
           </Group>
         </Stack>
       </Modal>

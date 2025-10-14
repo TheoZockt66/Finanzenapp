@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- Background -->
+  <rect width="32" height="32" rx="6" fill="#339af0"/>
+  
+  <!-- Calculator body -->
+  <rect x="6" y="4" width="20" height="24" rx="2" fill="#ffffff"/>
+  
+  <!-- Screen -->
+  <rect x="8" y="6" width="16" height="4" rx="1" fill="#212529"/>
+  
+  <!-- Buttons (simplified) -->
+  <circle cx="10" cy="14" r="1.5" fill="#f8f9fa"/>
+  <circle cx="14" cy="14" r="1.5" fill="#f8f9fa"/>
+  <circle cx="18" cy="14" r="1.5" fill="#f8f9fa"/>
+  <circle cx="22" cy="14" r="1.5" fill="#ff922b"/>
+  
+  <circle cx="10" cy="18" r="1.5" fill="#f8f9fa"/>
+  <circle cx="14" cy="18" r="1.5" fill="#f8f9fa"/>
+  <circle cx="18" cy="18" r="1.5" fill="#f8f9fa"/>
+  <circle cx="22" cy="18" r="1.5" fill="#ff922b"/>
+  
+  <circle cx="10" cy="22" r="1.5" fill="#f8f9fa"/>
+  <ellipse cx="16" cy="22" rx="3" ry="1.5" fill="#f8f9fa"/>
+  <circle cx="22" cy="22" r="1.5" fill="#51cf66"/>
+  
+  <!-- Euro symbol -->
+  <text x="20" y="8.5" font-family="Arial" font-size="3" font-weight="bold" fill="#51cf66">€</text>
+</svg>
