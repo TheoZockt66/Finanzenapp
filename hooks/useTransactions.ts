@@ -10,7 +10,11 @@ export function useTransactions() {
   const [error, setError] = useState<string | null>(null);
 
   const loadTransactions = useCallback(async () => {
-    if (!user?.id) return;
+    if (!user?.id) {
+      setTransactions([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {

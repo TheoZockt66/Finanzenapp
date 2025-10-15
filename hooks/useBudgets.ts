@@ -10,7 +10,11 @@ export function useBudgets() {
   const [error, setError] = useState<string | null>(null);
 
   const loadBudgets = useCallback(async () => {
-    if (!user?.id) return;
+    if (!user?.id) {
+      setBudgets([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {

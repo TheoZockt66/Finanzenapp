@@ -14,7 +14,9 @@ import type {
   CreateCostPlanData,
   UpdateCostPlanData,
   CreateIncomeSourceData,
-  UpdateIncomeSourceData
+  UpdateIncomeSourceData,
+  CreateTransactionCategoryData,
+  UpdateTransactionCategoryData
 } from '../types';
 
 export async function getTransactionCategories(userId: string): Promise<FinanzenTransactionCategory[]> {
@@ -30,6 +32,62 @@ export async function getTransactionCategories(userId: string): Promise<Finanzen
   }
 
   return data || [];
+}
+
+export async function createTransactionCategory(
+  data: CreateTransactionCategoryData
+): Promise<FinanzenTransactionCategory | null> {
+  const { data: result, error } = await supabase
+    .from(FINANZEN_TABLES.TRANSACTION_CATEGORIES)
+    .insert([data])
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error creating transaction category:', error);
+    throw error;
+  }
+
+  return result || null;
+}
+
+export async function updateTransactionCategory(
+  categoryId: string,
+  userId: string,
+  data: UpdateTransactionCategoryData
+): Promise<FinanzenTransactionCategory | null> {
+  const { data: result, error } = await supabase
+    .from(FINANZEN_TABLES.TRANSACTION_CATEGORIES)
+    .update(data)
+    .eq('id', categoryId)
+    .eq('user_id', userId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error updating transaction category:', error);
+    throw error;
+  }
+
+  return result || null;
+}
+
+export async function deleteTransactionCategory(
+  categoryId: string,
+  userId: string
+): Promise<boolean> {
+  const { error } = await supabase
+    .from(FINANZEN_TABLES.TRANSACTION_CATEGORIES)
+    .delete()
+    .eq('id', categoryId)
+    .eq('user_id', userId);
+
+  if (error) {
+    console.error('Error deleting transaction category:', error);
+    throw error;
+  }
+
+  return true;
 }
 
 // =============================================

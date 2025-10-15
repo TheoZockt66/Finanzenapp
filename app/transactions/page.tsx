@@ -1,18 +1,18 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { 
-  Container, 
-  Title, 
-  Paper, 
-  TextInput, 
-  Select, 
-  Button, 
-  Group, 
-  Table, 
-  Badge, 
-  ActionIcon, 
-  Text, 
+import {
+  Container,
+  Title,
+  Paper,
+  TextInput,
+  Select,
+  Button,
+  Group,
+  Table,
+  Badge,
+  ActionIcon,
+  Text,
   NumberInput,
   Grid,
   Card,
@@ -25,10 +25,11 @@ import {
   Flex,
   ScrollArea,
   Menu,
+  Loader,
   rem
 } from '@mantine/core';
 import { DatePickerInput, DateInput } from '@mantine/dates';
-import { IconPlus, IconTrash, IconEdit, IconFilter, IconFilterOff, IconSearch, IconDotsVertical, IconTrendingUp, IconTrendingDown, IconCalendar, IconReceipt } from '@tabler/icons-react';
+import { IconPlus, IconTrash, IconEdit, IconFilter, IconFilterOff, IconSearch, IconDotsVertical, IconTrendingUp, IconTrendingDown, IconCalendar, IconReceipt, IconLogin, IconSettings } from '@tabler/icons-react';
 import { useDisclosure, useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import dayjs from 'dayjs';
@@ -37,7 +38,9 @@ import customParseFormat from 'dayjs/plugin/customParseFormat';
 import { useTransactions } from '../../hooks/useTransactions';
 import { useBudgets } from '../../hooks/useBudgets';
 import { useTransactionCategories } from '../../hooks/useTransactionCategories';
+import { useAuth } from '../../contexts/AuthContext';
 import type { FinanzenTransactionCategory, FinanzenBudget } from '../../lib/types';
+import Link from 'next/link';
 
 dayjs.extend(customParseFormat);
 dayjs.locale('de');
@@ -84,7 +87,24 @@ interface TransactionFormState {
   datum: Date;
 }
 
+const CATEGORY_CREATE_VALUE = '__create_category__';
+const CATEGORY_MANAGE_VALUE = '__manage_categories__';
+
+const CATEGORY_COLOR_OPTIONS = [
+  { value: 'blue', label: 'Blau' },
+  { value: 'green', label: 'Gruen' },
+  { value: 'teal', label: 'Teal' },
+  { value: 'cyan', label: 'Cyan' },
+  { value: 'orange', label: 'Orange' },
+  { value: 'red', label: 'Rot' },
+  { value: 'pink', label: 'Pink' },
+  { value: 'violet', label: 'Violett' },
+  { value: 'yellow', label: 'Gelb' },
+  { value: 'gray', label: 'Grau' },
+];
+
 export default function TransactionsPage() {
+  const { user, loading: authLoading } = useAuth();
   const isMobile = useMediaQuery('(max-width: 768px)');
   
   const {
@@ -104,9 +124,43 @@ export default function TransactionsPage() {
   const {
     categories,
     loading: categoriesLoading,
+    addCategory,
+    editCategory,
+    removeCategory,
   } = useTransactionCategories();
 
   const isLoadingData = transactionsLoading || budgetsLoading || categoriesLoading;
+
+  if (authLoading) {
+    return (
+      <Container size="sm" py="xl">
+        <Stack align="center" gap="md">
+          <Loader size="lg" />
+          <Text c="dimmed">Authentifizierung wird geladen ...</Text>
+        </Stack>
+      </Container>
+    );
+  }
+
+  if (!user) {
+    return (
+      <Container size="sm" py="xl">
+        <Stack align="center" gap="md">
+          <Title order={2}>Bitte anmelden</Title>
+          <Text ta="center" c="dimmed">
+            Du musst angemeldet sein, um Transaktionen hinzuzufÃ¼gen oder anzuzeigen.
+          </Text>
+          <Button
+            component={Link}
+            href="/auth"
+            leftSection={<IconLogin size={18} />}
+          >
+            Zur Anmeldung
+          </Button>
+        </Stack>
+      </Container>
+    );
+  }
 
   const categoryById = useMemo(() => {
     const map = new Map<string, FinanzenTransactionCategory>();
@@ -165,6 +219,15 @@ export default function TransactionsPage() {
     [categories]
   );
 
+  const categorySelectOptions = useMemo(() => {
+    const options = [...kategorieOptions];
+    options.push(
+      { value: CATEGORY_CREATE_VALUE, label: 'Neue Kategorie anlegenâ€¦' },
+      { value: CATEGORY_MANAGE_VALUE, label: 'Kategorien verwaltenâ€¦' }
+    );
+    return options;
+  }, [kategorieOptions]);
+
   const budgetFilterOptions = useMemo(
     () =>
       budgets.map((budget) => ({
@@ -178,7 +241,7 @@ export default function TransactionsPage() {
     () =>
       budgets.map((budget) => ({
         value: budget.id,
-        label: `${budget.name} (${(budget.betrag - budget.ausgegeben).toFixed(0)}€ verfügbar)`,
+        label: `${budget.name} (${(budget.betrag - budget.ausgegeben).toFixed(0)}€ verfuegbar)`,
       })),
     [budgets]
   );
@@ -209,6 +272,129 @@ export default function TransactionsPage() {
     beschreibung: '',
     datum: new Date()
   });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [categoryModalOpened, { open: openCategoryModal, close: closeCategoryModal }] = useDisclosure(false);
+  const [editingCategory, setEditingCategory] = useState<FinanzenTransactionCategory | null>(null);
+  const [categoryForm, setCategoryForm] = useState({ name: '', color: 'blue' });
+  const [categorySaving, setCategorySaving] = useState(false);
+
+  const handleCloseCategoryModal = () => {
+    closeCategoryModal();
+    setEditingCategory(null);
+    setCategoryForm({ name: '', color: 'blue' });
+  };
+
+  const handleOpenCreateCategory = () => {
+    setEditingCategory(null);
+    setCategoryForm({ name: '', color: 'blue' });
+    openCategoryModal();
+  };
+
+  const handleOpenEditCategory = (category: FinanzenTransactionCategory) => {
+    setEditingCategory(category);
+    setCategoryForm({
+      name: category.name,
+      color: category.color || 'blue',
+    });
+    openCategoryModal();
+  };
+
+  const handleSubmitCategory = async () => {
+    const trimmedName = categoryForm.name.trim();
+    const trimmedColor = categoryForm.color.trim() || 'blue';
+
+    if (!trimmedName) {
+      notifications.show({
+        title: 'Name erforderlich',
+        message: 'Bitte gib einen Kategorienamen ein.',
+        color: 'orange',
+      });
+      return;
+    }
+
+    try {
+      setCategorySaving(true);
+      if (editingCategory) {
+        const updated = await editCategory(editingCategory.id, {
+          name: trimmedName,
+          color: trimmedColor,
+        });
+        if (updated) {
+          setEditingCategory(updated);
+          setCategoryForm({
+            name: updated.name,
+            color: updated.color || trimmedColor,
+          });
+        }
+        notifications.show({
+          title: 'Kategorie aktualisiert',
+          message: 'Die Kategorie wurde gespeichert.',
+          color: 'green',
+        });
+      } else {
+        const created = await addCategory({
+          name: trimmedName,
+          color: trimmedColor,
+        });
+        if (created) {
+          setFormData((prev) => ({ ...prev, kategorieId: created.id }));
+          setCategoryForm({
+            name: '',
+            color: trimmedColor,
+          });
+        }
+        notifications.show({
+          title: 'Kategorie erstellt',
+          message: 'Die neue Kategorie ist verfuegbar.',
+          color: 'green',
+        });
+        setEditingCategory(null);
+      }
+    } catch (error) {
+      console.error('Fehler beim Speichern der Kategorie:', error);
+      notifications.show({
+        title: 'Fehler',
+        message: 'Die Kategorie konnte nicht gespeichert werden.',
+        color: 'red',
+      });
+    } finally {
+      setCategorySaving(false);
+    }
+  };
+
+  const handleDeleteCategory = async (category: FinanzenTransactionCategory) => {
+    const confirmed = window.confirm(
+      `Soll die Kategorie "${category.name}" wirklich geloescht werden?`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const success = await removeCategory(category.id);
+      if (success) {
+        if (formData.kategorieId === category.id) {
+          setFormData((prev) => ({ ...prev, kategorieId: '' }));
+        }
+        if (editingCategory?.id === category.id) {
+          setEditingCategory(null);
+          setCategoryForm({ name: '', color: 'blue' });
+        }
+        notifications.show({
+          title: 'Kategorie geloescht',
+          message: 'Die Kategorie wurde entfernt.',
+          color: 'green',
+        });
+      }
+    } catch (error) {
+      console.error('Fehler beim Loeschen der Kategorie:', error);
+      notifications.show({
+        title: 'Fehler',
+        message: 'Die Kategorie konnte nicht geloescht werden.',
+        color: 'red',
+      });
+    }
+  };
 
   // Helper Funktionen
   const getCategoryColor = (categoryId?: string | null) => {
@@ -287,20 +473,36 @@ export default function TransactionsPage() {
     open();
   };
 
+  const handleCategorySelect = (value: string | null) => {
+    if (value === CATEGORY_CREATE_VALUE) {
+      handleOpenCreateCategory();
+      return;
+    }
+
+    if (value === CATEGORY_MANAGE_VALUE) {
+      setEditingCategory(null);
+      setCategoryForm({ name: '', color: 'blue' });
+      openCategoryModal();
+      return;
+    }
+
+    setFormData(prev => ({ ...prev, kategorieId: value || '' }));
+  };
+
   const handleSubmit = async () => {
-    if (!formData.beschreibung || formData.betrag <= 0) {
+    if (formData.betrag <= 0) {
       notifications.show({
-        title: 'Unvollständige Angaben',
-        message: 'Bitte fülle alle Pflichtfelder aus.',
+        title: 'Ungueltiger Betrag',
+        message: 'Bitte gib einen Betrag groesser als 0 ein.',
         color: 'orange',
       });
       return;
     }
 
-    if (!formData.kategorieId || !formData.budgetId) {
+    if (!formData.budgetId) {
       notifications.show({
-        title: 'Auswahl erforderlich',
-        message: 'Bitte wähle eine Kategorie und ein Budget aus.',
+        title: 'Budget erforderlich',
+        message: 'Bitte waehle ein Budget aus.',
         color: 'orange',
       });
       return;
@@ -310,7 +512,7 @@ export default function TransactionsPage() {
 
     const payload = {
       amount: formData.betrag,
-      description: formData.beschreibung,
+      description: formData.beschreibung.trim() || '',
       type: formData.typ === 'Einnahme' ? 'income' : 'expense',
       category_id: formData.kategorieId || null,
       budget_id: formData.budgetId || null,
@@ -356,19 +558,19 @@ export default function TransactionsPage() {
     try {
       const success = await removeTransaction(id);
       if (!success) {
-        throw new Error('Transaktion konnte nicht gelöscht werden');
+        throw new Error('Transaktion konnte nicht geloescht werden');
       }
       await refreshBudgets();
       notifications.show({
-        title: 'Transaktion gelöscht',
+        title: 'Transaktion geloescht',
         message: 'Die Transaktion wurde erfolgreich entfernt.',
         color: 'green',
       });
     } catch (error) {
-      console.error('Fehler beim Löschen der Transaktion:', error);
+      console.error('Fehler beim Loeschen der Transaktion:', error);
       notifications.show({
-        title: 'Fehler beim Löschen',
-        message: 'Die Transaktion konnte nicht gelöscht werden.',
+        title: 'Fehler beim Loeschen',
+        message: 'Die Transaktion konnte nicht geloescht werden.',
         color: 'red',
       });
     }
@@ -418,7 +620,7 @@ export default function TransactionsPage() {
               <Text size="xs" c="dimmed">
                 {dayjs(transaction.datum).format('DD.MM.YYYY')}
               </Text>
-              <Text size="xs" c="dimmed">•</Text>
+              <Text size="xs" c="dimmed">â€¢</Text>
               <Text size="xs" c="dimmed">
                 {transaction.budget || 'Kein Budget'}
               </Text>
@@ -461,7 +663,7 @@ export default function TransactionsPage() {
                     handleDeleteTransaction(transaction.id);
                   }}
                 >
-                  Löschen
+                  Loeschen
                 </Menu.Item>
               </Menu.Dropdown>
             </Menu>
@@ -528,7 +730,7 @@ export default function TransactionsPage() {
                   onClick={clearFilters}
                   size={isMobile ? "xs" : "sm"}
                 >
-                  {isMobile ? 'Reset' : 'Zurücksetzen'}
+                  {isMobile ? 'Reset' : 'Zuruecksetzen'}
                 </Button>
               )}
             </Group>
@@ -652,7 +854,7 @@ export default function TransactionsPage() {
                 <Grid.Col span={{ base: 12, md: 4 }}>
                   <DatePickerInput
                     label="Von Datum"
-                    placeholder="Startdatum wählen"
+                    placeholder="Startdatum wÃ¤hlen"
                     value={filters.dateFrom}
                     onChange={(value) => setFilters(prev => ({ ...prev, dateFrom: value }))}
                     valueFormat="DD.MM.YYYY"
@@ -664,7 +866,7 @@ export default function TransactionsPage() {
                 <Grid.Col span={{ base: 12, md: 4 }}>
                   <DatePickerInput
                     label="Bis Datum"
-                    placeholder="Enddatum wählen"
+                    placeholder="Enddatum wÃ¤hlen"
                     value={filters.dateTo}
                     onChange={(value) => setFilters(prev => ({ ...prev, dateTo: value }))}
                     valueFormat="DD.MM.YYYY"
@@ -762,7 +964,7 @@ export default function TransactionsPage() {
                 </Text>
                 {!hasActiveFilters() && (
                   <Button leftSection={<IconPlus size={16} />} onClick={openAddForm} disabled={isLoadingData}>
-                    Erste Transaktion hinzufügen
+                    Erste Transaktion hinzufuegen
                   </Button>
                 )}
               </Stack>
@@ -889,10 +1091,10 @@ export default function TransactionsPage() {
             <SimpleGrid cols={isMobile ? 1 : 2} spacing="md">
               <Select
                 label="Typ"
-                placeholder="Typ auswählen"
+                placeholder="Typ auswaehlen"
                 data={[
-                  { value: 'Einnahme', label: '💰 Einnahme' },
-                  { value: 'Ausgabe', label: '💸 Ausgabe' }
+                  { value: 'Einnahme', label: 'Einnahme' },
+                  { value: 'Ausgabe', label: 'Ausgabe' }
                 ]}
                 value={formData.typ}
                 onChange={(value) => setFormData(prev => ({ ...prev, typ: value as 'Einnahme' | 'Ausgabe' }))}
@@ -916,17 +1118,49 @@ export default function TransactionsPage() {
 
             <Select
               label="Kategorie"
-              placeholder="Kategorie auswählen"
-              data={kategorieOptions}
-              value={formData.kategorieId}
-              onChange={(value) => setFormData(prev => ({ ...prev, kategorieId: value || '' }))}
-              required
+              placeholder="Kategorie auswaehlen"
+              data={categorySelectOptions}
+              value={formData.kategorieId || null}
+              onChange={handleCategorySelect}
+              clearable
+              rightSection={(
+                <Group gap="xs" wrap="nowrap">
+                  <ActionIcon
+                    variant="subtle"
+                    size="sm"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      handleOpenCreateCategory();
+                    }}
+                  >
+                    <IconPlus size={14} />
+                  </ActionIcon>
+                  <ActionIcon
+                    variant="subtle"
+                    size="sm"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setEditingCategory(null);
+                      setCategoryForm({ name: '', color: 'blue' });
+                      openCategoryModal();
+                    }}
+                  >
+                    <IconSettings size={14} />
+                  </ActionIcon>
+                </Group>
+              )}
+              rightSectionWidth={70}
+              rightSectionProps={{ style: { pointerEvents: 'auto' } }}
               size={isMobile ? "md" : "sm"}
             />
 
             <Select
               label="Budget"
-              placeholder="Budget auswählen"
+              placeholder="Budget auswaehlen"
               data={budgetFormOptions}
               value={formData.budgetId}
               onChange={(value) => setFormData(prev => ({ ...prev, budgetId: value || '' }))}
@@ -939,13 +1173,12 @@ export default function TransactionsPage() {
               placeholder="Kurze Beschreibung der Transaktion"
               value={formData.beschreibung}
               onChange={(e) => setFormData(prev => ({ ...prev, beschreibung: e.target.value }))}
-              required
               size={isMobile ? "md" : "sm"}
             />
 
             <DateInput
               label="Datum"
-              placeholder="Datum auswählen"
+              placeholder="Datum auswaehlen"
               value={formData.datum}
               onChange={(value) => setFormData(prev => ({ ...prev, datum: value || new Date() }))}
               valueFormat="DD.MM.YYYY"
@@ -978,6 +1211,127 @@ export default function TransactionsPage() {
             </Group>
           </Stack>
         </Modal>
+
+        <Modal
+          opened={categoryModalOpened}
+          onClose={handleCloseCategoryModal}
+          title={editingCategory ? 'Kategorie bearbeiten' : 'Kategorien verwalten'}
+          size={isMobile ? "100%" : "sm"}
+          fullScreen={isMobile}
+          styles={{
+            header: {
+              paddingBottom: rem(10),
+            },
+            title: {
+              fontWeight: 700,
+              fontSize: rem(18),
+            }
+          }}
+        >
+          <Stack gap="md">
+            <Stack gap="sm">
+              <TextInput
+                label={editingCategory ? 'Kategorie bearbeiten' : 'Neue Kategorie'}
+                placeholder="Name der Kategorie"
+                value={categoryForm.name}
+                onChange={(event) =>
+                  setCategoryForm((prev) => ({ ...prev, name: event.currentTarget.value }))
+                }
+              />
+              <Select
+                label="Farbe"
+                placeholder="Farbe auswaehlen"
+                data={CATEGORY_COLOR_OPTIONS}
+                value={categoryForm.color}
+                onChange={(value) =>
+                  setCategoryForm((prev) => ({ ...prev, color: value || 'blue' }))
+                }
+                withinPortal
+              />
+            </Stack>
+
+            <Group justify="flex-end" gap="sm">
+              {editingCategory && (
+                <Button
+                  variant="subtle"
+                  onClick={handleOpenCreateCategory}
+                  disabled={categorySaving}
+                >
+                  Neu anlegen
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                onClick={handleCloseCategoryModal}
+                disabled={categorySaving}
+              >
+                Schliessen
+              </Button>
+              <Button
+                onClick={handleSubmitCategory}
+                loading={categorySaving}
+              >
+                {editingCategory ? 'Speichern' : 'Erstellen'}
+              </Button>
+            </Group>
+
+            <Divider />
+
+            <Stack gap="xs">
+              <Text size="sm" c="dimmed">
+                Bestehende Kategorien
+              </Text>
+              <ScrollArea h={200}>
+                {categories.length === 0 ? (
+                  <Text size="sm" c="dimmed" ta="center">
+                    Keine Kategorien vorhanden.
+                  </Text>
+                ) : (
+                  <Stack gap="xs" mt="xs">
+                    {categories.map((category) => (
+                      <Group
+                        key={category.id}
+                        justify="space-between"
+                        align="center"
+                      >
+                        <Group gap="xs">
+                          <Badge color={category.color || 'gray'} variant="filled">
+                            {category.name}
+                          </Badge>
+                          {category.is_default && (
+                            <Badge variant="outline" size="xs">
+                              Standard
+                            </Badge>
+                          )}
+                        </Group>
+                        <Group gap="xs">
+                          <ActionIcon
+                            variant="subtle"
+                            size="sm"
+                            onClick={() => handleOpenEditCategory(category)}
+                            title="Bearbeiten"
+                          >
+                            <IconEdit size={14} />
+                          </ActionIcon>
+                          <ActionIcon
+                            variant="subtle"
+                            color="red"
+                            size="sm"
+                            onClick={() => handleDeleteCategory(category)}
+                            disabled={category.is_default}
+                            title="Loeschen"
+                          >
+                            <IconTrash size={14} />
+                          </ActionIcon>
+                        </Group>
+                      </Group>
+                    ))}
+                  </Stack>
+                )}
+              </ScrollArea>
+            </Stack>
+          </Stack>
+        </Modal>
       </Stack>
 
       {/* Floating Action Button for Mobile */}
@@ -1003,3 +1357,12 @@ export default function TransactionsPage() {
     </Container>
   );
 }
+
+
+
+
+
+
+
+
+
