@@ -1,4 +1,4 @@
-// TypeScript Types für Finanzen-Datenbank mit "finanzen_" Prefix
+﻿// TypeScript Types fuer Finanzen-Datenbank mit "finanzen_" Prefix
 
 export interface FinanzenTransactionCategory {
   id: string;
@@ -16,6 +16,7 @@ export interface FinanzenBudget {
   user_id: string;
   name: string;
   amount: number;
+  color?: string;
   spent: number;
   carryover: number;
   period: 'weekly' | 'monthly' | 'yearly';
@@ -84,9 +85,15 @@ export interface FinanzenCostItem {
   updated_at: string;
 }
 
+export interface FinanzenCostPlanWithDetails extends FinanzenCostPlan {
+  categories: FinanzenCostCategory[];
+  costItems: FinanzenCostItem[];
+}
+
 export interface FinanzenIncomeSource {
   id: string;
   user_id: string;
+  cost_plan_id: string | null;
   name: string;
   amount: number;
   frequency: 'weekly' | 'monthly' | 'yearly' | 'one-time';
@@ -96,6 +103,11 @@ export interface FinanzenIncomeSource {
   description?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface FinanzenCostPlansSnapshot {
+  costPlans: FinanzenCostPlanWithDetails[];
+  incomeSources: FinanzenIncomeSource[];
 }
 
 export interface FinanzenBudgetReset {
@@ -156,7 +168,7 @@ export type UpdateCostPlanData = Partial<Omit<FinanzenCostPlan, 'id' | 'user_id'
 export type CreateIncomeSourceData = Omit<FinanzenIncomeSource, 'id' | 'created_at' | 'updated_at'>;
 export type UpdateIncomeSourceData = Partial<Omit<FinanzenIncomeSource, 'id' | 'user_id' | 'created_at'>>;
 
-// Form Types für UI
+// Form Types fuer UI
 export interface TransactionFormData {
   amount: number;
   description: string;
@@ -189,6 +201,7 @@ export interface IncomeSourceFormData {
   name: string;
   amount: number;
   frequency: 'weekly' | 'monthly' | 'yearly' | 'one-time';
+  cost_plan_id: string;
   start_date: Date;
   end_date?: Date;
   description?: string;

@@ -1,10 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import {
-  getCostPlans,
-  getCostCategories,
-  getCostItemsByPlan,
-  getIncomeSourcesByUser,
+  getCostPlansSnapshot,
   createCostPlan,
   updateCostPlan,
   deleteCostPlan,
@@ -19,12 +16,12 @@ import {
   deleteIncomeSource,
   calculateMonthlyAmount
 } from '../lib/services/costPlanService';
-import type { 
-  FinanzenCostPlan, 
-  FinanzenCostCategory, 
-  FinanzenCostItem,
-  FinanzenIncomeSource
+import type {
+  FinanzenCostPlan,
+  FinanzenIncomeSource,
+  FinanzenCostPlanWithDetails
 } from '../lib/types';
+import { readCache, writeCache, withCacheKey } from '../lib/utils/browserCache';
 import { notifications } from '@mantine/notifications';
 
 // Auth Error Handler
@@ -49,10 +46,7 @@ const handleAuthError = (error: unknown) => {
 };
 
 // Combined interface for the UI
-export interface CostPlanWithDetails extends FinanzenCostPlan {
-  categories: FinanzenCostCategory[];
-  costItems: FinanzenCostItem[];
-}
+export type CostPlanWithDetails = FinanzenCostPlanWithDetails;
 
 export interface IncomeSourceWithMonthly extends FinanzenIncomeSource {
   monthlyAmount: number;
@@ -63,60 +57,147 @@ export function useCostPlans() {
   const [costPlans, setCostPlans] = useState<CostPlanWithDetails[]>([]);
   const [incomeSources, setIncomeSources] = useState<IncomeSourceWithMonthly[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const loadData = useCallback(async () => {
-    if (!user?.id) return;
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      // Load cost plans
-      const plans = await getCostPlans(user.id);
-      
-      // Load categories and cost items for each plan
-      const plansWithDetails = await Promise.all(
-        plans.map(async (plan) => {
-          const [categories, costItems] = await Promise.all([
-            getCostCategories(plan.id, user.id),
-            getCostItemsByPlan(plan.id, user.id)
-          ]);
-
-          return {
-            ...plan,
-            categories,
-            costItems
-          };
-        })
-      );
-
-      // Load income sources
-      const sources = await getIncomeSourcesByUser(user.id);
-      const sourcesWithMonthly = sources.map(source => ({
-        ...source,
-        monthlyAmount: calculateMonthlyAmount(source.amount, source.frequency)
-      }));
-
-      setCostPlans(plansWithDetails);
-      setIncomeSources(sourcesWithMonthly);
-    } catch (error) {
-      console.error('Error loading cost plan data:', error);
-      
-      // Check for auth errors first
-      if (handleAuthError(error)) {
-        return; // Auth error handled, stop execution
-      }
-      
-      setError('Fehler beim Laden der Kostenpläne');
-    } finally {
-      setLoading(false);
-    }
-  }, [user?.id]);
+  const costPlansRef = useRef<CostPlanWithDetails[]>([]);
+  const incomeSourcesRef = useRef<IncomeSourceWithMonthly[]>([]);
+  const cacheKey = withCacheKey('finanzen:costPlansSnapshot', user?.id);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    costPlansRef.current = costPlans;
+  }, [costPlans]);
+
+  useEffect(() => {
+    incomeSourcesRef.current = incomeSources;
+  }, [incomeSources]);
+
+  const syncCache = useCallback(
+    (plans: CostPlanWithDetails[], incomes: IncomeSourceWithMonthly[]) => {
+      if (cacheKey) {
+        writeCache(cacheKey, { costPlans: plans, incomeSources: incomes });
+      }
+    },
+    [cacheKey],
+  );
+
+  const loadData = useCallback(
+    async (options?: { skipLoading?: boolean }) => {
+      const skipInitialLoading = options?.skipLoading ?? false;
+
+      if (!user?.id) {
+        setCostPlans([]);
+        setIncomeSources([]);
+        setLoading(false);
+        setRefreshing(false);
+        setError(null);
+        return { costPlans: [] as CostPlanWithDetails[], incomeSources: [] as IncomeSourceWithMonthly[] };
+      }
+
+      const shouldShowInitialLoader = !skipInitialLoading && costPlansRef.current.length === 0;
+
+      if (shouldShowInitialLoader) {
+        setLoading(true);
+      } else {
+        setRefreshing(true);
+      }
+      setError(null);
+
+      try {
+        const snapshot = await getCostPlansSnapshot();
+        const nextCostPlans = snapshot.costPlans ?? [];
+        const nextIncomeSources = (snapshot.incomeSources ?? []).map((source) => ({
+          ...source,
+          monthlyAmount: calculateMonthlyAmount(source.amount, source.frequency),
+        }));
+
+        costPlansRef.current = nextCostPlans;
+        incomeSourcesRef.current = nextIncomeSources;
+        setCostPlans(nextCostPlans);
+        setIncomeSources(nextIncomeSources);
+        syncCache(nextCostPlans, nextIncomeSources);
+
+        return { costPlans: nextCostPlans, incomeSources: nextIncomeSources };
+      } catch (error) {
+        console.error('Error loading cost plan data:', error);
+
+        if (handleAuthError(error)) {
+          return { costPlans: costPlansRef.current, incomeSources: incomeSourcesRef.current };
+        }
+
+        setError('Fehler beim Laden der Kostenplaene');
+        throw error;
+      } finally {
+        if (shouldShowInitialLoader) {
+          setLoading(false);
+        }
+        setRefreshing(false);
+      }
+    },
+    [user?.id, syncCache],
+  );
+
+  useEffect(() => {
+    if (!user?.id) {
+      setCostPlans([]);
+      setIncomeSources([]);
+      setLoading(false);
+      setRefreshing(false);
+      setError(null);
+      return;
+    }
+
+    if (!cacheKey) {
+      void loadData();
+      return;
+    }
+
+    const cached = readCache<{ costPlans: CostPlanWithDetails[]; incomeSources: IncomeSourceWithMonthly[] }>(cacheKey);
+    if (cached) {
+      const cachedPlans = Array.isArray(cached.costPlans) ? cached.costPlans : [];
+      const cachedIncomesRaw = Array.isArray(cached.incomeSources) ? cached.incomeSources : [];
+      const cachedIncomes = cachedIncomesRaw.map((source) => ({
+        ...source,
+        monthlyAmount: source.monthlyAmount ?? calculateMonthlyAmount(source.amount, source.frequency),
+      }));
+      costPlansRef.current = cachedPlans;
+      incomeSourcesRef.current = cachedIncomes;
+      setCostPlans(cachedPlans);
+      setIncomeSources(cachedIncomes);
+      setLoading(false);
+      void loadData({ skipLoading: true });
+    } else {
+      void loadData();
+    }
+  }, [user?.id, cacheKey, loadData]);
+
+  const applyCostPlansUpdate = useCallback(
+    (updater: (prev: CostPlanWithDetails[]) => CostPlanWithDetails[]) => {
+      setCostPlans((prev) => {
+        const next = updater(prev);
+        costPlansRef.current = next;
+        syncCache(next, incomeSourcesRef.current);
+        return next;
+      });
+    },
+    [syncCache],
+  );
+
+  const applyIncomeSourcesUpdate = useCallback(
+    (updater: (prev: IncomeSourceWithMonthly[]) => IncomeSourceWithMonthly[]) => {
+      setIncomeSources((prev) => {
+        const next = updater(prev);
+        incomeSourcesRef.current = next;
+        syncCache(costPlansRef.current, next);
+        return next;
+      });
+    },
+    [syncCache],
+  );
+
+  const refreshData = useCallback(
+    () => loadData({ skipLoading: costPlansRef.current.length > 0 }),
+    [loadData],
+  );
 
   // =============================================
   // COST PLAN OPERATIONS
@@ -134,7 +215,7 @@ export function useCostPlans() {
       });
 
       // Add to state with empty categories and items
-      setCostPlans(prev => [...prev, {
+      applyCostPlansUpdate(prev => [...prev, {
         ...newPlan,
         categories: [],
         costItems: []
@@ -164,7 +245,7 @@ export function useCostPlans() {
     try {
       const updatedPlan = await updateCostPlan(planId, user.id, { name, description });
       
-      setCostPlans(prev => prev.map(plan => 
+      applyCostPlansUpdate(prev => prev.map(plan => 
         plan.id === planId 
           ? { ...plan, ...updatedPlan }
           : plan
@@ -197,7 +278,7 @@ export function useCostPlans() {
     try {
       await deleteCostPlan(planId, user.id);
       
-      setCostPlans(prev => prev.filter(plan => plan.id !== planId));
+      applyCostPlansUpdate(prev => prev.filter(plan => plan.id !== planId));
 
       notifications.show({
         title: 'Erfolg',
@@ -232,7 +313,7 @@ export function useCostPlans() {
         color
       });
 
-      setCostPlans(prev => prev.map(plan => 
+      applyCostPlansUpdate(prev => prev.map(plan => 
         plan.id === planId 
           ? { ...plan, categories: [...plan.categories, newCategory] }
           : plan
@@ -262,7 +343,7 @@ export function useCostPlans() {
     try {
       const updatedCategory = await updateCostCategory(categoryId, user.id, { name, color });
       
-      setCostPlans(prev => prev.map(plan => ({
+      applyCostPlansUpdate(prev => prev.map(plan => ({
         ...plan,
         categories: plan.categories.map(cat => 
           cat.id === categoryId ? updatedCategory : cat
@@ -293,7 +374,7 @@ export function useCostPlans() {
     try {
       await deleteCostCategory(categoryId, user.id);
       
-      setCostPlans(prev => prev.map(plan => 
+      applyCostPlansUpdate(prev => prev.map(plan => 
         plan.id === planId 
           ? { 
               ...plan, 
@@ -346,7 +427,7 @@ export function useCostPlans() {
         ...data
       });
 
-      setCostPlans(prev => prev.map(plan => 
+      applyCostPlansUpdate(prev => prev.map(plan => 
         plan.id === planId 
           ? { ...plan, costItems: [...plan.costItems, newItem] }
           : plan
@@ -389,7 +470,7 @@ export function useCostPlans() {
     try {
       const updatedItem = await updateCostItem(itemId, user.id, data);
       
-      setCostPlans(prev => prev.map(plan => 
+      applyCostPlansUpdate(prev => prev.map(plan => 
         plan.id === planId 
           ? { 
               ...plan, 
@@ -424,7 +505,7 @@ export function useCostPlans() {
     try {
       await deleteCostItem(itemId, user.id);
       
-      setCostPlans(prev => prev.map(plan => 
+      applyCostPlansUpdate(prev => prev.map(plan => 
         plan.id === planId 
           ? { ...plan, costItems: plan.costItems.filter(item => item.id !== itemId) }
           : plan
@@ -452,7 +533,7 @@ export function useCostPlans() {
   // INCOME SOURCE OPERATIONS
   // =============================================
 
-  const addIncomeSource = async (data: {
+  const addIncomeSource = async (planId: string, data: {
     name: string;
     amount: number;
     frequency: 'weekly' | 'monthly' | 'yearly' | 'one-time';
@@ -460,11 +541,12 @@ export function useCostPlans() {
     end_date?: string;
     description?: string;
   }): Promise<boolean> => {
-    if (!user?.id) return false;
+    if (!user?.id || !planId) return false;
 
     try {
       const newSource = await createIncomeSource({
         user_id: user.id,
+        cost_plan_id: planId,
         is_active: true,
         ...data
       });
@@ -474,7 +556,7 @@ export function useCostPlans() {
         monthlyAmount: calculateMonthlyAmount(newSource.amount, newSource.frequency)
       };
 
-      setIncomeSources(prev => [...prev, sourceWithMonthly]);
+      applyIncomeSourcesUpdate(prev => [...prev, sourceWithMonthly]);
 
       notifications.show({
         title: 'Erfolg',
@@ -494,7 +576,7 @@ export function useCostPlans() {
     }
   };
 
-  const editIncomeSource = async (sourceId: string, data: {
+  const editIncomeSource = async (sourceId: string, planId: string, data: {
     name?: string;
     amount?: number;
     frequency?: 'weekly' | 'monthly' | 'yearly' | 'one-time';
@@ -502,19 +584,25 @@ export function useCostPlans() {
     end_date?: string;
     description?: string;
   }): Promise<boolean> => {
-    if (!user?.id) return false;
+    if (!user?.id || !planId) return false;
 
     try {
-      const updatedSource = await updateIncomeSource(sourceId, user.id, data);
+      const updatedSource = await updateIncomeSource(sourceId, user.id, {
+        ...data,
+        cost_plan_id: planId
+      });
       
       const sourceWithMonthly = {
         ...updatedSource,
         monthlyAmount: calculateMonthlyAmount(updatedSource.amount, updatedSource.frequency)
       };
 
-      setIncomeSources(prev => prev.map(source => 
-        source.id === sourceId ? sourceWithMonthly : source
-      ));
+      applyIncomeSourcesUpdate(prev => prev.map(source => {
+        if (source.id === sourceId) {
+          return sourceWithMonthly;
+        }
+        return source;
+      }));
 
       notifications.show({
         title: 'Erfolg',
@@ -540,7 +628,7 @@ export function useCostPlans() {
     try {
       await deleteIncomeSource(sourceId, user.id);
       
-      setIncomeSources(prev => prev.filter(source => source.id !== sourceId));
+      applyIncomeSourcesUpdate(prev => prev.filter(source => source.id !== sourceId));
 
       notifications.show({
         title: 'Erfolg',
@@ -564,8 +652,9 @@ export function useCostPlans() {
     costPlans,
     incomeSources,
     loading,
+    refreshing,
     error,
-    refresh: loadData,
+    refresh: refreshData,
     
     // Cost Plan operations
     addCostPlan,

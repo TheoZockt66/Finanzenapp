@@ -1,6 +1,6 @@
--- Finanzenapp Database Schema mit "finanzen_" Prefix
+﻿-- Finanzenapp Database Schema mit "finanzen_" Prefix
 -- Erweitert die bestehende Fitness-App Datenbank um Finanz-Features
--- Alle Tabellen haben den "finanzen_" Prefix für bessere Organisation
+-- Alle Tabellen haben den "finanzen_" Prefix fuer bessere Organisation
 
 -- =============================================
 -- UTILITY FUNCTIONS
@@ -16,7 +16,7 @@ END;
 $$ language 'plpgsql';
 
 -- =============================================
--- KATEGORIEN FÜR TRANSAKTIONEN
+-- KATEGORIEN FUeR TRANSAKTIONEN
 -- =============================================
 
 CREATE TABLE public.finanzen_transaction_categories (
@@ -49,8 +49,10 @@ FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TABLE public.finanzen_budgets (
   id uuid NOT NULL DEFAULT extensions.uuid_generate_v4(),
   user_id uuid NOT NULL,
+  cost_plan_id uuid NULL,
   name VARCHAR(100) NOT NULL,
   amount DECIMAL(10,2) NOT NULL CHECK (amount > 0),
+  color VARCHAR(30) NOT NULL DEFAULT 'blue',
   spent DECIMAL(10,2) NOT NULL DEFAULT 0 CHECK (spent >= 0),
   carryover DECIMAL(10,2) NOT NULL DEFAULT 0,
   period VARCHAR(20) NOT NULL DEFAULT 'monthly' CHECK (period IN ('weekly', 'monthly', 'yearly')),
@@ -87,7 +89,7 @@ CREATE TABLE public.finanzen_transactions (
   id uuid NOT NULL DEFAULT extensions.uuid_generate_v4(),
   user_id uuid NOT NULL,
   amount DECIMAL(10,2) NOT NULL CHECK (amount > 0),
-  description VARCHAR(255) NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
   type VARCHAR(20) NOT NULL CHECK (type IN ('income', 'expense')),
   category_id uuid NULL,
   budget_id uuid NULL,
@@ -128,7 +130,7 @@ BEFORE UPDATE ON finanzen_transactions
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- =============================================
--- KOSTENPLÄNE
+-- KOSTENPLAeNE
 -- =============================================
 
 CREATE TABLE public.finanzen_cost_plans (
@@ -244,12 +246,21 @@ CREATE TABLE public.finanzen_income_sources (
   CONSTRAINT finanzen_income_sources_pkey PRIMARY KEY (id),
   CONSTRAINT finanzen_income_sources_user_id_fkey FOREIGN KEY (user_id) 
     REFERENCES auth.users (id) ON DELETE CASCADE,
-  CONSTRAINT finanzen_income_sources_user_name_unique UNIQUE (user_id, name),
+  CONSTRAINT finanzen_income_sources_cost_plan_id_fkey FOREIGN KEY (cost_plan_id)
+    REFERENCES public.finanzen_cost_plans (id) ON DELETE CASCADE,
   CONSTRAINT finanzen_income_sources_date_check CHECK (end_date IS NULL OR end_date >= start_date)
 ) TABLESPACE pg_default;
 
 CREATE INDEX idx_finanzen_income_sources_user_id ON public.finanzen_income_sources 
 USING btree (user_id) TABLESPACE pg_default;
+
+CREATE INDEX idx_finanzen_income_sources_cost_plan_id ON public.finanzen_income_sources
+USING btree (cost_plan_id) TABLESPACE pg_default;
+
+CREATE UNIQUE INDEX finanzen_income_sources_unique_plan_name ON public.finanzen_income_sources (user_id, cost_plan_id, name);
+
+CREATE UNIQUE INDEX finanzen_income_sources_unique_global_name ON public.finanzen_income_sources (user_id, name)
+WHERE cost_plan_id IS NULL;
 
 CREATE TRIGGER update_finanzen_income_sources_updated_at 
 BEFORE UPDATE ON finanzen_income_sources 
@@ -418,11 +429,10 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE OR REPLACE FUNCTION update_finanzen_budget_spent()
 RETURNS TRIGGER AS $$
 BEGIN
-  -- If this is an expense transaction with a budget
-  IF NEW.type = 'expense' AND NEW.budget_id IS NOT NULL THEN
-    -- Update budget spent amount
+  -- Apply spent update only for expense transactions that target a budget
+  IF NEW.type = 'expense' AND NEW.budget_id IS NOT NULL AND NEW.amount IS NOT NULL THEN
     UPDATE public.finanzen_budgets 
-    SET spent = spent + NEW.amount
+    SET spent = COALESCE(spent, 0) + NEW.amount
     WHERE id = NEW.budget_id AND user_id = NEW.user_id;
   END IF;
   
@@ -434,11 +444,10 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE OR REPLACE FUNCTION revert_finanzen_budget_spent()
 RETURNS TRIGGER AS $$
 BEGIN
-  -- If this was an expense transaction with a budget
-  IF OLD.type = 'expense' AND OLD.budget_id IS NOT NULL THEN
-    -- Revert budget spent amount
+  -- Revert spent amount only when the previous row was an expense with a budget
+  IF OLD.type = 'expense' AND OLD.budget_id IS NOT NULL AND OLD.amount IS NOT NULL THEN
     UPDATE public.finanzen_budgets 
-    SET spent = spent - OLD.amount
+    SET spent = GREATEST(COALESCE(spent, 0) - OLD.amount, 0)
     WHERE id = OLD.budget_id AND user_id = OLD.user_id;
   END IF;
   
@@ -499,6 +508,14 @@ CREATE TRIGGER sync_finanzen_budget_on_transaction_insert
 CREATE TRIGGER sync_finanzen_budget_on_transaction_delete
   BEFORE DELETE ON public.finanzen_transactions
   FOR EACH ROW EXECUTE FUNCTION revert_finanzen_budget_spent();
+
+CREATE TRIGGER sync_finanzen_budget_on_transaction_update_before
+  BEFORE UPDATE ON public.finanzen_transactions
+  FOR EACH ROW EXECUTE FUNCTION revert_finanzen_budget_spent();
+
+CREATE TRIGGER sync_finanzen_budget_on_transaction_update_after
+  AFTER UPDATE ON public.finanzen_transactions
+  FOR EACH ROW EXECUTE FUNCTION update_finanzen_budget_spent();
 
 -- Cost plan total calculation triggers
 CREATE TRIGGER update_finanzen_cost_plan_total_on_category_change
@@ -566,10 +583,10 @@ GROUP BY cp.id, cp.user_id, cp.name, cp.total_estimated_cost;
 -- KOMMENTARE
 -- =============================================
 
-COMMENT ON TABLE public.finanzen_transaction_categories IS 'Kategorien für Transaktionen (Lebensmittel, Transport, etc.)';
-COMMENT ON TABLE public.finanzen_budgets IS 'Budgets mit Übertrag-Funktionalität';
+COMMENT ON TABLE public.finanzen_transaction_categories IS 'Kategorien fuer Transaktionen (Lebensmittel, Transport, etc.)';
+COMMENT ON TABLE public.finanzen_budgets IS 'Budgets mit Uebertrag-Funktionalitaet';
 COMMENT ON TABLE public.finanzen_transactions IS 'Alle Einnahmen und Ausgaben';
-COMMENT ON TABLE public.finanzen_cost_plans IS 'Kostenpläne für verschiedene Szenarien';
+COMMENT ON TABLE public.finanzen_cost_plans IS 'Kostenplaene fuer verschiedene Szenarien';
 COMMENT ON TABLE public.finanzen_cost_categories IS 'Kategorien innerhalb eines Kostenplans';
 COMMENT ON TABLE public.finanzen_cost_items IS 'Einzelne Kostenpunkte in einer Kategorie';
 COMMENT ON TABLE public.finanzen_income_sources IS 'Einkommensquellen (Gehalt, etc.)';
@@ -580,22 +597,22 @@ COMMENT ON TABLE public.finanzen_budget_resets IS 'Historie der Budget-Resets';
 -- =============================================
 
 -- Datenbank Schema erstellt mit folgenden Tabellen:
--- ✅ finanzen_transaction_categories - Kategorien für Transaktionen
--- ✅ finanzen_budgets - Budgets mit Carryover
--- ✅ finanzen_transactions - Einnahmen und Ausgaben
--- ✅ finanzen_cost_plans - Kostenpläne
--- ✅ finanzen_cost_categories - Kostenkategorien
--- ✅ finanzen_cost_items - Einzelne Kostenpunkte
--- ✅ finanzen_income_sources - Einkommensquellen
--- ✅ finanzen_budget_resets - Budget Reset Historie
+-- - finanzen_transaction_categories - Kategorien fuer Transaktionen
+-- - finanzen_budgets - Budgets mit Carryover
+-- - finanzen_transactions - Einnahmen und Ausgaben
+-- - finanzen_cost_plans - Kostenplaene
+-- - finanzen_cost_categories - Kostenkategorien
+-- - finanzen_cost_items - Einzelne Kostenpunkte
+-- - finanzen_income_sources - Einkommensquellen
+-- - finanzen_budget_resets - Budget Reset Historie
 --
--- ✅ RLS Policies für alle Tabellen
--- ✅ Trigger für automatische Budget-Synchronisation
--- ✅ Views für Analytics und Reporting
--- ✅ Functions für Standard-Kategorien und Berechnungen
+-- - RLS Policies fuer alle Tabellen
+-- - Trigger fuer automatische Budget-Synchronisation
+-- - Views fuer Analytics und Reporting
+-- - Functions fuer Standard-Kategorien und Berechnungen
 --
--- Nächste Schritte:
+-- Naechste Schritte:
 -- 1. Supabase Environment Variables in .env.local setzen
--- 2. TypeScript Types für die neuen Tabellen erstellen
--- 3. API Routes für CRUD Operationen implementieren
+-- 2. TypeScript Types fuer die neuen Tabellen erstellen
+-- 3. API Routes fuer CRUD Operationen implementieren
 -- 4. Frontend Components mit echten Daten verbinden

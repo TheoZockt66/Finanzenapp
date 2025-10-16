@@ -134,6 +134,7 @@ export default function CostsPage() {
     costPlans,
     incomeSources,
     loading,
+    refreshing,
     error,
     refresh,
     addCostPlan,
@@ -190,7 +191,8 @@ export default function CostsPage() {
     frequency: 'monthly' as 'weekly' | 'monthly' | 'yearly' | 'one-time',
     start_date: new Date().toISOString().split('T')[0],
     end_date: '',
-    description: ''
+    description: '',
+    cost_plan_id: ''
   });
   const [editingIncome, setEditingIncome] = useState(false);
 
@@ -267,8 +269,26 @@ export default function CostsPage() {
     }
   }
 
+  const fallbackPlanId = costPlans[0]?.id ?? '';
+  const planIncomeSources = useMemo(
+    () =>
+      incomeSources.filter((source) => {
+        if (source.cost_plan_id) {
+          return source.cost_plan_id === activePlanId;
+        }
+        return fallbackPlanId && activePlanId === fallbackPlanId;
+      }),
+    [incomeSources, activePlanId, fallbackPlanId]
+  );
+  const unassignedIncomeSources = useMemo(
+    () => incomeSources.filter((source) => !source.cost_plan_id),
+    [incomeSources]
+  );
+
+  const isInitialLoading = loading && costPlans.length === 0 && incomeSources.length === 0;
+
   // Loading and error states
-  if (loading) {
+  if (isInitialLoading) {
     return (
       <Container size="xl" py="xl">
         <LoadingOverlay visible={true} overlayProps={{ radius: "sm", blur: 2 }} />
@@ -297,28 +317,15 @@ export default function CostsPage() {
   }
 
   // Calculation helpers
-  const totalIncome = incomeSources.reduce((sum, source) => sum + source.monthlyAmount, 0);
-  
-  // Debug: Log cost items for current plan
-  console.log('💰 Cost calculation debug for plan:', activePlan?.name);
-  console.log('📋 Active plan ID:', activePlanId);
-  console.log('🔢 Cost items count:', costItems.length);
-  console.log('📝 Cost items:', costItems.map(item => ({
-    name: item.name,
-    cost: item.estimated_cost,
-    quantity: item.quantity,
-    category: item.cost_category_id
-  })));
+  const totalIncome = planIncomeSources.reduce((sum, source) => sum + source.monthlyAmount, 0);
   
   const totalCosts = costItems.reduce((sum, item) => {
     // Berechne jährliche Kosten und teile durch 12 für monatliche Kosten
     const yearlyItemCost = item.estimated_cost * (item.quantity || 1);
     const monthlyItemCost = yearlyItemCost / 12;
-    console.log(`💸 Item "${item.name}": ${item.estimated_cost} * ${item.quantity} = ${yearlyItemCost}/Jahr = ${monthlyItemCost.toFixed(2)}/Monat`);
     return sum + monthlyItemCost;
   }, 0);
   
-  console.log('💵 Total monthly costs:', totalCosts.toFixed(2));
   const balance = totalIncome - totalCosts;
 
   // Plan management
@@ -359,8 +366,6 @@ export default function CostsPage() {
 
   const handleCopyPlan = async (planToCopy: CostPlanWithDetails) => {
     try {
-      console.log('🔄 Starting plan copy for:', planToCopy.name);
-      console.log('📋 Plan to copy has:', planToCopy.categories.length, 'categories and', planToCopy.costItems.length, 'cost items');
       
       // Erstelle den neuen Plan
       const newPlan = await addCostPlan(`${planToCopy.name} (Kopie)`, planToCopy.description);
@@ -369,17 +374,14 @@ export default function CostsPage() {
         return;
       }
 
-      console.log('✅ Created new plan:', newPlan.name, 'with ID:', newPlan.id);
 
       // Kopiere alle Kategorien sequenziell und sammle die Kategorie-Mappings
       const categoryMappings: Array<{oldId: string, newId: string, name: string}> = [];
       
       for (const category of planToCopy.categories) {
-        console.log('🔄 Copying category:', category.name, 'with color:', category.color);
         const categorySuccess = await addCostCategory(newPlan.id, category.name, category.color);
         
         if (categorySuccess) {
-          console.log('✅ Created category:', category.name);
           categoryMappings.push({
             oldId: category.id,
             newId: '', // Wird später gefüllt
@@ -390,10 +392,8 @@ export default function CostsPage() {
         }
       }
 
-      console.log('📝 Category mappings to resolve:', categoryMappings.length);
 
       // Lade den neuen Plan direkt aus der Datenbank statt auf State zu warten
-      console.log('🔄 Loading new plan directly from database...');
       
       // Import der Service-Funktion wenn nicht schon vorhanden
       const { getCostPlanWithDetails } = await import('../../lib/services/costPlanService');
@@ -405,27 +405,20 @@ export default function CostsPage() {
       // Versuche mehrmals den Plan zu laden
       while (!updatedPlan && attempts < maxAttempts) {
         attempts++;
-        console.log(`🔄 Attempt ${attempts}/${maxAttempts} to load plan from database...`);
         
         try {
           if (user?.id) {
             updatedPlan = await getCostPlanWithDetails(newPlan.id, user.id);
             if (updatedPlan) {
-              console.log('✅ Successfully loaded plan from database:', updatedPlan.name);
-              console.log('� Plan has', updatedPlan.categories.length, 'categories');
             } else {
-              console.log('⏳ Plan not yet available, waiting 1 second...');
               await new Promise(resolve => setTimeout(resolve, 1000));
             }
           }
-        } catch (error) {
-          console.log(`❌ Attempt ${attempts} failed:`, error);
+        } catch {
           await new Promise(resolve => setTimeout(resolve, 1000));
         }
       }
       
-      console.log('🔍 Final result - updatedPlan found:', !!updatedPlan);
-      console.log('📂 Categories available:', updatedPlan?.categories.length || 0);
       
       if (updatedPlan) {
         // Mappe die Kategorie-IDs
@@ -433,26 +426,17 @@ export default function CostsPage() {
           const newCategory = updatedPlan.categories.find(cat => cat.name === mapping.name);
           if (newCategory) {
             mapping.newId = newCategory.id;
-            console.log('✅ Mapped category:', mapping.name, 'from', mapping.oldId, 'to', mapping.newId);
           } else {
             console.error('❌ Could not find new category with name:', mapping.name);
-            console.log('Available categories:', updatedPlan.categories.map(c => c.name));
           }
         }
 
         // Zeige Mapping-Ergebnisse
-        const successfulMappings = categoryMappings.filter(m => m.newId);
-        console.log('📊 Successful category mappings:', successfulMappings.length, 'of', categoryMappings.length);
-
-        // Kopiere alle Kostenpositionen
-        console.log('🔄 Starting to copy', planToCopy.costItems.length, 'cost items...');
-        let copiedItemsCount = 0;
-        
+        // Kopiere alle Kostenpositionen        
         for (const item of planToCopy.costItems) {
           const categoryMapping = categoryMappings.find(m => m.oldId === item.cost_category_id);
           
           if (categoryMapping && categoryMapping.newId) {
-            console.log('🔄 Copying cost item:', item.name, 'to category:', categoryMapping.name, '(ID:', categoryMapping.newId, ')');
             
             const itemSuccess = await addCostItem(newPlan.id, categoryMapping.newId, {
               name: item.name,
@@ -463,10 +447,7 @@ export default function CostsPage() {
               notes: item.notes || ''
             });
             
-            if (itemSuccess) {
-              copiedItemsCount++;
-              console.log('✅ Copied cost item:', item.name, '(', copiedItemsCount, '/', planToCopy.costItems.length, ')');
-            } else {
+            if (!itemSuccess) {
               console.error('❌ Failed to copy cost item:', item.name);
             }
           } else {
@@ -476,10 +457,8 @@ export default function CostsPage() {
           }
         }
         
-        console.log('📊 Copied', copiedItemsCount, 'of', planToCopy.costItems.length, 'cost items');
       } else {
         console.error('❌ Could not find updated plan after refresh');
-        console.log('🔄 Trying one more refresh and manual search...');
         
         // Versuche es noch einmal mit längerem Warten
         await new Promise(resolve => setTimeout(resolve, 3000));
@@ -487,18 +466,14 @@ export default function CostsPage() {
         
         const retryPlan = costPlans.find(p => p.id === newPlan.id);
         if (retryPlan) {
-          console.log('✅ Found plan on retry!');
           // Hier könntest du den gleichen Code wie oben wiederholen
           // Aber für jetzt beenden wir mit einer Warnung
-          console.log('⚠️ Plan found but skipping item copying due to timing issues');
         } else {
           console.error('💥 Plan still not found after retry. Available plans:', costPlans.map(p => p.name));
-          console.log('🎯 This might be a timing issue with the database/state update');
         }
       }
 
       // Finale Datenaktualisierung und Aktivierung des neuen Plans
-      console.log('🔄 Final refresh and activating new plan...');
       await refresh();
       
       // Warte ein bisschen und prüfe ob der Plan jetzt im State ist
@@ -506,21 +481,13 @@ export default function CostsPage() {
       const finalPlan = costPlans.find(p => p.id === newPlan.id);
       
       if (finalPlan) {
-        console.log('✅ Final plan found in state:', finalPlan.name);
-        console.log('📊 Final plan stats:', {
-          categories: finalPlan.categories.length,
-          costItems: finalPlan.costItems.length,
-          totalCost: finalPlan.total_estimated_cost
-        });
         setActivePlanId(newPlan.id);
       } else {
-        console.log('⚠️ Plan not yet in state, forcing another refresh...');
         await refresh();
         // Aktiviere trotzdem den Plan, auch wenn er noch nicht im State ist
         setActivePlanId(newPlan.id);
       }
       
-      console.log('✅ Plan copy completed successfully');
       
     } catch (error) {
       console.error('💥 Error copying plan:', error);
@@ -568,6 +535,9 @@ export default function CostsPage() {
 
   // Income management
   const handleAddIncome = () => {
+    if (!activePlanId) {
+      return;
+    }
     setIncomeForm({ 
       id: '', 
       name: '', 
@@ -575,7 +545,8 @@ export default function CostsPage() {
       frequency: 'monthly',
       start_date: new Date().toISOString().split('T')[0],
       end_date: '',
-      description: ''
+      description: '',
+      cost_plan_id: activePlanId
     });
     setEditingIncome(false);
     setIncomeModalOpened(true);
@@ -589,17 +560,18 @@ export default function CostsPage() {
       frequency: item.frequency,
       start_date: item.start_date,
       end_date: item.end_date || '',
-      description: item.description || ''
+      description: item.description || '',
+      cost_plan_id: item.cost_plan_id || activePlanId
     });
     setEditingIncome(true);
     setIncomeModalOpened(true);
   };
 
   const handleSaveIncome = async () => {
-    if (!incomeForm.name || incomeForm.amount <= 0) return;
+    if (!incomeForm.name || incomeForm.amount <= 0 || !incomeForm.cost_plan_id) return;
     
     if (editingIncome) {
-      const success = await editIncomeSource(incomeForm.id, {
+      const success = await editIncomeSource(incomeForm.id, incomeForm.cost_plan_id, {
         name: incomeForm.name,
         amount: incomeForm.amount,
         frequency: incomeForm.frequency,
@@ -609,7 +581,7 @@ export default function CostsPage() {
       });
       if (success) setIncomeModalOpened(false);
     } else {
-      const success = await addIncomeSource({
+      const success = await addIncomeSource(incomeForm.cost_plan_id, {
         name: incomeForm.name,
         amount: incomeForm.amount,
         frequency: incomeForm.frequency,
@@ -797,15 +769,30 @@ export default function CostsPage() {
             {/* Income Tab */}
             <Tabs.Panel value="income" pt="md">
               <Card>
-                <Group justify="space-between" mb="md">
+                <Group justify="space-between" mb="md" align="center">
                   <Title order={3}>Einkommensquellen</Title>
-                  <Button leftSection={<IconPlus size={16} />} onClick={handleAddIncome}>
-                    Neue Einkommensquelle
-                  </Button>
+                  <Group gap="sm">
+                    {refreshing ? (
+                      <Badge color="blue" variant="light">
+                        Aktualisiere...
+                      </Badge>
+                    ) : null}
+                    <Button leftSection={<IconPlus size={16} />} onClick={handleAddIncome} disabled={!activePlanId}>
+                      Neue Einkommensquelle
+                    </Button>
+                  </Group>
                 </Group>
                 
-                {incomeSources.length === 0 ? (
-                  <Text ta="center" c="dimmed">Noch keine Einkommensquellen vorhanden</Text>
+                {planIncomeSources.length === 0 ? (
+                  <Stack gap="xs" align="center" py="lg">
+                    <Text ta="center" c="dimmed">Noch keine Einkommensquellen vorhanden</Text>
+                    {unassignedIncomeSources.length > 0 && activePlanId !== fallbackPlanId ? (
+                      <Text size="sm" c="dimmed" ta="center">
+                        {unassignedIncomeSources.length} Einnahme{unassignedIncomeSources.length === 1 ? '' : 'n'} sind noch keinem Plan zugeordnet.
+                        Weise sie beim Bearbeiten einem Plan zu, damit sie hier erscheinen.
+                      </Text>
+                    ) : null}
+                  </Stack>
                 ) : (
                   <Table>
                     <Table.Thead>
@@ -818,7 +805,7 @@ export default function CostsPage() {
                       </Table.Tr>
                     </Table.Thead>
                     <Table.Tbody>
-                      {incomeSources.map((source) => (
+                      {planIncomeSources.map((source) => (
                         <Table.Tr key={source.id}>
                           <Table.Td>{source.name}</Table.Td>
                           <Table.Td>{source.amount.toFixed(2)} €</Table.Td>
@@ -1071,6 +1058,16 @@ export default function CostsPage() {
             description="Wie oft erhalten Sie dieses Einkommen?"
           />
           
+          <Select
+            label="Plan"
+            value={incomeForm.cost_plan_id}
+            onChange={(value) => setIncomeForm(prev => ({ ...prev, cost_plan_id: value || '' }))}
+            data={costPlans.map(plan => ({ value: plan.id, label: plan.name }))}
+            required
+            withAsterisk
+            description="Welchem Kostenplan soll dieses Einkommen zugeordnet werden?"
+          />
+          
           <TextInput
             label="Startdatum"
             type="date"
@@ -1134,7 +1131,7 @@ export default function CostsPage() {
             <Button variant="light" onClick={() => setIncomeModalOpened(false)}>
               Abbrechen
             </Button>
-            <Button onClick={handleSaveIncome} disabled={!incomeForm.name || incomeForm.amount <= 0}>
+            <Button onClick={handleSaveIncome} disabled={!incomeForm.name || incomeForm.amount <= 0 || !incomeForm.cost_plan_id}>
               Speichern
             </Button>
           </Group>
@@ -1239,3 +1236,5 @@ export default function CostsPage() {
     </Container>
   );
 }
+
+

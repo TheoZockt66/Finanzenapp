@@ -21,6 +21,7 @@ $$ language 'plpgsql';
 CREATE TABLE public.transaction_categories (
   id uuid NOT NULL DEFAULT extensions.uuid_generate_v4(),
   user_id uuid NOT NULL,
+  cost_plan_id uuid NULL,
   name VARCHAR(100) NOT NULL,
   color VARCHAR(50) NOT NULL DEFAULT 'blue',
   icon VARCHAR(50) NULL,
@@ -226,11 +227,21 @@ CREATE TABLE public.income_sources (
   
   CONSTRAINT income_sources_pkey PRIMARY KEY (id),
   CONSTRAINT income_sources_user_id_fkey FOREIGN KEY (user_id) 
-    REFERENCES auth.users (id) ON DELETE CASCADE
+    REFERENCES auth.users (id) ON DELETE CASCADE,
+  CONSTRAINT income_sources_cost_plan_id_fkey FOREIGN KEY (cost_plan_id)
+    REFERENCES public.cost_plans (id) ON DELETE CASCADE
 ) TABLESPACE pg_default;
 
 CREATE INDEX idx_income_sources_user_id ON public.income_sources 
 USING btree (user_id) TABLESPACE pg_default;
+
+CREATE INDEX idx_income_sources_cost_plan_id ON public.income_sources 
+USING btree (cost_plan_id) TABLESPACE pg_default;
+
+CREATE UNIQUE INDEX income_sources_unique_plan_name ON public.income_sources (user_id, cost_plan_id, name);
+
+CREATE UNIQUE INDEX income_sources_unique_global_name ON public.income_sources (user_id, name)
+WHERE cost_plan_id IS NULL;
 
 CREATE INDEX idx_income_sources_user_active ON public.income_sources 
 USING btree (user_id, is_active) TABLESPACE pg_default;

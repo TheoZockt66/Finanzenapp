@@ -162,7 +162,8 @@ export default function CostsPage() {
     frequency: 'monthly' as 'weekly' | 'monthly' | 'yearly' | 'one-time',
     start_date: new Date().toISOString().split('T')[0],
     end_date: '',
-    description: ''
+    description: '',
+    cost_plan_id: ''
   });
   const [editingIncome, setEditingIncome] = useState(false);
 
@@ -313,6 +314,7 @@ export default function CostsPage() {
 
   // Income management
   const handleAddIncome = () => {
+    if (!activePlanId) return;
     setIncomeForm({ 
       id: '', 
       name: '', 
@@ -320,7 +322,8 @@ export default function CostsPage() {
       frequency: 'monthly',
       start_date: new Date().toISOString().split('T')[0],
       end_date: '',
-      description: ''
+      description: '',
+      cost_plan_id: activePlanId
     });
     setEditingIncome(false);
     setIncomeModalOpened(true);
@@ -334,17 +337,19 @@ export default function CostsPage() {
       frequency: item.frequency,
       start_date: item.start_date,
       end_date: item.end_date || '',
-      description: item.description || ''
+      description: item.description || '',
+      cost_plan_id: item.cost_plan_id || activePlanId
     });
     setEditingIncome(true);
     setIncomeModalOpened(true);
   };
 
   const handleSaveIncome = async () => {
-    if (!incomeForm.name || incomeForm.amount <= 0) return;
+    const planId = incomeForm.cost_plan_id || activePlanId;
+    if (!incomeForm.name || incomeForm.amount <= 0 || !planId) return;
     
     if (editingIncome) {
-      const success = await editIncomeSource(incomeForm.id, {
+      const success = await editIncomeSource(incomeForm.id, planId, {
         name: incomeForm.name,
         amount: incomeForm.amount,
         frequency: incomeForm.frequency,
@@ -354,7 +359,7 @@ export default function CostsPage() {
       });
       if (success) setIncomeModalOpened(false);
     } else {
-      const success = await addIncomeSource({
+      const success = await addIncomeSource(planId, {
         name: incomeForm.name,
         amount: incomeForm.amount,
         frequency: incomeForm.frequency,
@@ -594,7 +599,7 @@ export default function CostsPage() {
               <Card>
                 <Group justify="space-between" mb="md">
                   <Title order={3}>Einkommensquellen</Title>
-                  <Button leftSection={<IconPlus size={16} />} onClick={handleAddIncome}>
+                  <Button leftSection={<IconPlus size={16} />} onClick={handleAddIncome} disabled={!activePlanId}>
                     Neue Einkommensquelle
                   </Button>
                 </Group>
@@ -715,6 +720,13 @@ export default function CostsPage() {
             data={frequencyOptions}
             required
           />
+          <Select
+            label="Plan"
+            value={incomeForm.cost_plan_id || activePlanId}
+            onChange={(value) => setIncomeForm(prev => ({ ...prev, cost_plan_id: value || '' }))}
+            data={costPlans.map(plan => ({ value: plan.id, label: plan.name }))}
+            required
+          />
           <TextInput
             label="Startdatum"
             type="date"
@@ -735,7 +747,9 @@ export default function CostsPage() {
           />
           <Group justify="flex-end" mt="md">
             <Button variant="light" onClick={() => setIncomeModalOpened(false)}>Abbrechen</Button>
-            <Button onClick={handleSaveIncome}>Speichern</Button>
+            <Button onClick={handleSaveIncome} disabled={!incomeForm.name || incomeForm.amount <= 0 || !(incomeForm.cost_plan_id || activePlanId)}>
+              Speichern
+            </Button>
           </Group>
         </Stack>
       </Modal>

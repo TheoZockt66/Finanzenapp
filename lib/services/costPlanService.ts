@@ -11,6 +11,8 @@ import type {
   FinanzenCostCategory,
   FinanzenCostItem,
   FinanzenIncomeSource,
+  FinanzenCostPlanWithDetails,
+  FinanzenCostPlansSnapshot,
   CreateCostPlanData,
   UpdateCostPlanData,
   CreateIncomeSourceData,
@@ -207,18 +209,32 @@ export async function createTransaction(data: Partial<FinanzenTransaction>): Pro
 }
 
 export async function updateTransaction(transactionId: string, userId: string, data: Partial<FinanzenTransaction>): Promise<FinanzenTransaction | null> {
-  const { data: result, error } = await supabase
-    .from(FINANZEN_TABLES.TRANSACTIONS)
-    .update(data)
-    .eq('id', transactionId)
-    .eq('user_id', userId)
-    .select()
-    .single();
-  if (error) {
-    console.error('Error updating transaction:', error);
-    throw error;
+  try {
+    // Add updated_at timestamp
+    const updateData = {
+      ...data,
+      updated_at: new Date().toISOString(),
+    } as Record<string, unknown>;
+
+    const { data: result, error } = await supabase
+      .from(FINANZEN_TABLES.TRANSACTIONS)
+      .update(updateData)
+      .eq('id', transactionId)
+      .eq('user_id', userId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating transaction:', error);
+      // Provide more context when throwing
+      throw new Error(`Error updating transaction ${transactionId}: ${error.message || JSON.stringify(error)}`);
+    }
+
+    return result || null;
+  } catch (err) {
+    console.error('💥 updateTransaction failed:', err);
+    throw err;
   }
-  return result || null;
 }
 
 export async function deleteTransaction(transactionId: string, userId: string): Promise<boolean> {
@@ -251,6 +267,28 @@ export async function getCostPlans(userId: string): Promise<FinanzenCostPlan[]> 
   }
 
   return data || [];
+}
+
+export async function getCostPlansSnapshot(): Promise<FinanzenCostPlansSnapshot> {
+  const { data, error } = await supabase.rpc('get_finanzen_cost_plans_snapshot');
+
+  if (error) {
+    console.error('Error fetching cost plan snapshot:', error);
+    throw error;
+  }
+
+  const snapshot = (data ?? {}) as Partial<FinanzenCostPlansSnapshot>;
+  const costPlans = Array.isArray(snapshot.costPlans)
+    ? (snapshot.costPlans as FinanzenCostPlanWithDetails[])
+    : [];
+  const incomeSources = Array.isArray(snapshot.incomeSources)
+    ? (snapshot.incomeSources as FinanzenIncomeSource[])
+    : [];
+
+  return {
+    costPlans,
+    incomeSources,
+  };
 }
 
 export async function getCostPlanById(planId: string, userId: string): Promise<FinanzenCostPlan | null> {
