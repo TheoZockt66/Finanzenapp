@@ -81,7 +81,9 @@ export function useTransactions() {
 
   const addTransaction = async (transaction: Partial<FinanzenTransaction>) => {
     if (!user?.id) return null;
+    console.log('useTransactions.addTransaction payload:', transaction);
     const newTransaction = await createTransaction({ ...transaction, user_id: user.id });
+    console.log('useTransactions.addTransaction result:', newTransaction);
     if (newTransaction) {
       setTransactions(prev => {
         const next = [...prev, newTransaction];
@@ -96,7 +98,9 @@ export function useTransactions() {
 
   const editTransaction = async (transactionId: string, data: Partial<FinanzenTransaction>) => {
     if (!user?.id) return null;
+    console.log('useTransactions.editTransaction:', { transactionId, data });
     const updated = await updateTransaction(transactionId, user.id, data);
+    console.log('useTransactions.editTransaction result:', updated);
     if (updated) {
       setTransactions(prev => {
         const next = prev.map(t => (t.id === transactionId ? updated : t));
@@ -111,7 +115,9 @@ export function useTransactions() {
 
   const removeTransaction = async (transactionId: string) => {
     if (!user?.id) return false;
+    console.log('useTransactions.removeTransaction:', transactionId);
     const success = await deleteTransaction(transactionId, user.id);
+    console.log('useTransactions.removeTransaction result:', success);
     if (success) {
       setTransactions(prev => {
         const next = prev.filter(t => t.id !== transactionId);

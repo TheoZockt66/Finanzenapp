@@ -54,7 +54,7 @@ type TransactionFormState = {
   id?: string;
   type: 'income' | 'expense';
   amount: number;
-  categoryId: string;
+  categoryId?: string;
   budgetId: string;
   description: string;
   date: Date;
@@ -115,7 +115,7 @@ const INITIAL_FILTERS: FilterState = {
 const INITIAL_FORM: TransactionFormState = {
   type: 'expense',
   amount: 0,
-  categoryId: '',
+  categoryId: undefined,
   budgetId: '',
   description: '',
   date: new Date(),
@@ -308,7 +308,7 @@ export default function TransactionsPage() {
   const handleOpenCreateTransaction = () => {
     setFormState({
       ...INITIAL_FORM,
-      categoryId: categoryData[0]?.value ?? '',
+      categoryId: categoryData[0]?.value ?? undefined,
       budgetId: budgetData[0]?.value ?? '',
     });
     transactionModalHandlers.open();
@@ -319,7 +319,7 @@ export default function TransactionsPage() {
       id: transaction.id,
       type: transaction.type,
       amount: transaction.amount ?? 0,
-      categoryId: transaction.category_id ?? '',
+      categoryId: transaction.category_id ?? undefined,
       budgetId: transaction.budget_id ?? '',
       description: transaction.description ?? '',
       date: dayjs(transaction.transaction_date).toDate(),
@@ -328,7 +328,8 @@ export default function TransactionsPage() {
   };
 
   const handleSaveTransaction = async () => {
-    if (!formState.categoryId || !formState.budgetId) {
+    // categoryId is optional now; only budgetId is required
+    if (!formState.budgetId) {
       return;
     }
     if (formState.amount <= 0) {
@@ -339,7 +340,7 @@ export default function TransactionsPage() {
       amount: formState.amount,
       description: formState.description.trim(),
       type: formState.type,
-      category_id: formState.categoryId,
+  category_id: formState.categoryId ?? undefined,
       budget_id: formState.budgetId,
       transaction_date: dayjs(formState.date).format('YYYY-MM-DD'),
       is_recurring: false,
@@ -827,10 +828,10 @@ export default function TransactionsPage() {
           <Select
             label="Kategorie"
             data={categoryData}
-            value={formState.categoryId}
-            onChange={(value) => setFormState((prev) => ({ ...prev, categoryId: value ?? '' }))}
+            value={formState.categoryId ?? ''}
+            onChange={(value) => setFormState((prev) => ({ ...prev, categoryId: value ?? undefined }))}
             searchable
-            required
+            clearable
           />
           <Select
             label="Budget"

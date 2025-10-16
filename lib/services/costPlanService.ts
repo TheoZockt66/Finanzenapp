@@ -78,18 +78,38 @@ export async function deleteTransactionCategory(
   categoryId: string,
   userId: string
 ): Promise<boolean> {
-  const { error } = await supabase
-    .from(FINANZEN_TABLES.TRANSACTION_CATEGORIES)
-    .delete()
-    .eq('id', categoryId)
-    .eq('user_id', userId);
+  try {
+    console.log('deleteTransactionCategory called:', { categoryId, userId });
 
-  if (error) {
-    console.error('Error deleting transaction category:', error);
-    throw error;
+    // 1) Set category_id = NULL on transactions belonging to this user and category
+    const { error: nullifyError } = await supabase
+      .from(FINANZEN_TABLES.TRANSACTIONS)
+      .update({ category_id: null })
+      .eq('category_id', categoryId)
+      .eq('user_id', userId);
+
+    if (nullifyError) {
+      console.error('Error nullifying transaction.category_id before deleting category:', nullifyError);
+      throw nullifyError;
+    }
+
+    // 2) Delete the category
+    const { error } = await supabase
+      .from(FINANZEN_TABLES.TRANSACTION_CATEGORIES)
+      .delete()
+      .eq('id', categoryId)
+      .eq('user_id', userId);
+
+    if (error) {
+      console.error('Error deleting transaction category:', error);
+      throw error;
+    }
+
+    return true;
+  } catch (err) {
+    console.error('deleteTransactionCategory failed:', err);
+    throw err;
   }
-
-  return true;
 }
 
 // =============================================
@@ -196,11 +216,13 @@ export async function getTransactionById(transactionId: string, userId: string):
 }
 
 export async function createTransaction(data: Partial<FinanzenTransaction>): Promise<FinanzenTransaction | null> {
+  console.log('createTransaction called with:', data);
   const { data: result, error } = await supabase
     .from(FINANZEN_TABLES.TRANSACTIONS)
     .insert([data])
     .select()
     .single();
+  console.log('createTransaction result:', { result, error });
   if (error) {
     console.error('Error creating transaction:', error);
     throw error;
@@ -216,6 +238,8 @@ export async function updateTransaction(transactionId: string, userId: string, d
       updated_at: new Date().toISOString(),
     } as Record<string, unknown>;
 
+    console.log('updateTransaction called with:', { transactionId, userId, updateData });
+
     const { data: result, error } = await supabase
       .from(FINANZEN_TABLES.TRANSACTIONS)
       .update(updateData)
@@ -223,6 +247,8 @@ export async function updateTransaction(transactionId: string, userId: string, d
       .eq('user_id', userId)
       .select()
       .single();
+
+    console.log('updateTransaction result:', { result, error });
 
     if (error) {
       console.error('Error updating transaction:', error);
