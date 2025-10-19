@@ -110,6 +110,19 @@ export function useCostPlans() {
           monthlyAmount: calculateMonthlyAmount(source.amount, source.frequency),
         }));
 
+        // Debug: print income sources shape to help diagnose missing cost_plan_id
+        try {
+          console.debug('useCostPlans: loaded incomeSources', nextIncomeSources);
+          const byPlan = nextIncomeSources.reduce((acc, s) => {
+            const k = s.cost_plan_id ?? '__UNASSIGNED__';
+            acc[k] = (acc[k] || 0) + 1;
+            return acc;
+          }, {} as Record<string, number>);
+          console.debug('useCostPlans: incomeSources by plan', byPlan);
+        } catch {
+          // ignore logging errors
+        }
+
         costPlansRef.current = nextCostPlans;
         incomeSourcesRef.current = nextIncomeSources;
         setCostPlans(nextCostPlans);
@@ -544,12 +557,10 @@ export function useCostPlans() {
     if (!user?.id || !planId) return false;
 
     try {
-      const newSource = await createIncomeSource({
-        user_id: user.id,
-        cost_plan_id: planId,
-        is_active: true,
-        ...data
-      });
+      const payload = { user_id: user.id, cost_plan_id: planId, is_active: true, ...data };
+      console.log('addIncomeSource payload:', payload);
+      const newSource = await createIncomeSource(payload);
+      console.log('addIncomeSource result:', newSource);
 
       const sourceWithMonthly = {
         ...newSource,
@@ -564,9 +575,21 @@ export function useCostPlans() {
         color: 'green'
       });
 
+      // Refresh to ensure server snapshot is authoritative (helps detect DB-side issues)
+      try {
+        await loadData({ skipLoading: true });
+      } catch {
+        // ignore refresh errors here
+      }
+
       return true;
     } catch (error) {
       console.error('Error creating income source:', error);
+      // Friendly message for duplicate name
+      if (error && typeof error === 'object' && 'code' in (error as Record<string, unknown>) && (error as Record<string, unknown>)['code'] === 'DUPLICATE_NAME') {
+        notifications.show({ title: 'Fehler', message: 'Es existiert bereits eine Einkommensquelle mit diesem Namen in diesem Plan.', color: 'yellow' });
+        return false;
+      }
       notifications.show({
         title: 'Fehler',
         message: 'Einkommensquelle konnte nicht erstellt werden',
@@ -610,6 +633,12 @@ export function useCostPlans() {
         color: 'green'
       });
 
+      // Re-sync with server snapshot
+      try {
+        await loadData({ skipLoading: true });
+      } catch {
+        // ignore
+      }
       return true;
     } catch (error) {
       console.error('Error updating income source:', error);

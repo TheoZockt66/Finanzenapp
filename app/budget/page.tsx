@@ -1,30 +1,39 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { notifications } from '@mantine/notifications';
 import {
   ActionIcon,
-  Alert,
   Badge,
+  Box,
   Button,
   Card,
+  Center,
   Container,
+  Divider,
   Grid,
   Group,
-  Indicator,
   Modal,
   NumberInput,
   Progress,
-  ScrollArea,
   SegmentedControl,
   Select,
+  SimpleGrid,
   Stack,
   Text,
   TextInput,
   ThemeIcon,
   Title,
-  Tooltip,
 } from '@mantine/core';
-import { IconAlertTriangle, IconChartPie, IconEdit, IconGauge, IconPlus, IconTrash, IconWallet } from '@tabler/icons-react';
+import {
+  IconDotsVertical,
+  IconEdit,
+  IconPigMoney,
+  IconPlus,
+  IconTargetArrow,
+  IconTrash,
+  IconTrendingUp,
+} from '@tabler/icons-react';
 import { useBudgets } from '../../hooks/useBudgets';
 import type { FinanzenBudget } from '../../lib/types';
 
@@ -37,21 +46,21 @@ type BudgetFormState = {
   categoryId: string;
 };
 
-type BudgetFilter = 'all' | 'healthy' | 'overspent';
+type FilterOption = 'all' | 'healthy' | 'warning' | 'over';
 
 const COLOR_OPTIONS = [
-  { value: 'blue', label: 'Blau' },
-  { value: 'green', label: 'Gruen' },
-  { value: 'orange', label: 'Orange' },
-  { value: 'red', label: 'Rot' },
-  { value: 'purple', label: 'Lila' },
-  { value: 'cyan', label: 'Cyan' },
-  { value: 'pink', label: 'Pink' },
-  { value: 'yellow', label: 'Gelb' },
-  { value: 'teal', label: 'Tuerkis' },
-  { value: 'indigo', label: 'Indigo' },
-  { value: 'lime', label: 'Limette' },
-  { value: 'grape', label: 'Traube' },
+  { value: 'blue', label: 'blue' },
+  { value: 'green', label: 'green' },
+  { value: 'orange', label: 'orange' },
+  { value: 'red', label: 'red' },
+  { value: 'purple', label: 'purple' },
+  { value: 'cyan', label: 'cyan' },
+  { value: 'pink', label: 'pink' },
+  { value: 'yellow', label: 'yellow' },
+  { value: 'teal', label: 'teal' },
+  { value: 'indigo', label: 'indigo' },
+  { value: 'lime', label: 'lime' },
+  { value: 'grape', label: 'grape' },
 ];
 
 const INITIAL_FORM: BudgetFormState = {
@@ -63,20 +72,25 @@ const INITIAL_FORM: BudgetFormState = {
   categoryId: '',
 };
 
-const formatCurrency = (value: number) => `EUR ${value.toFixed(2)}`;
+const FILTER_OPTIONS: { value: FilterOption; label: string }[] = [
+  { value: 'all', label: 'Alle' },
+  { value: 'healthy', label: 'Im Rahmen' },
+  { value: 'warning', label: 'Nahe Limit' },
+  { value: 'over', label: 'Ueberzogen' },
+];
 
-const mapFormToPayload = (form: BudgetFormState): Partial<FinanzenBudget> => {
-  const hasValidResetDay = Number.isFinite(form.resetDay);
-  return {
-    name: form.name.trim(),
-    amount: Number.isFinite(form.amount) ? form.amount : 0,
-    color: form.color,
-    reset_day: hasValidResetDay
-      ? Math.min(Math.max(Math.round(form.resetDay), 1), 31)
-      : undefined,
-    category_id: form.categoryId ? form.categoryId : undefined,
-  };
-};
+const formatCurrency = (value: number) =>
+  `EUR ${value.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const mapFormToPayload = (form: BudgetFormState) => ({
+  name: form.name.trim(),
+  amount: Number.isFinite(form.amount) ? form.amount : 0,
+  color: form.color,
+  reset_day: Number.isFinite(form.resetDay)
+    ? Math.min(Math.max(Math.round(form.resetDay), 1), 31)
+    : undefined,
+  category_id: form.categoryId ? form.categoryId : undefined,
+});
 
 const toFormState = (budget: FinanzenBudget): BudgetFormState => ({
   id: budget.id,
@@ -88,14 +102,15 @@ const toFormState = (budget: FinanzenBudget): BudgetFormState => ({
 });
 
 export default function BudgetPage() {
-  const { budgets, loading, refreshing, error, addBudget, editBudget, removeBudget, refresh } = useBudgets();
+  const { budgets, loading, error, addBudget, editBudget, removeBudget, refresh } = useBudgets();
 
   const [modalOpened, setModalOpened] = useState(false);
   const [formState, setFormState] = useState<BudgetFormState>(INITIAL_FORM);
   const [editingBudgetId, setEditingBudgetId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [viewFilter, setViewFilter] = useState<BudgetFilter>('all');
+  const [filter, setFilter] = useState<FilterOption>('all');
+  const [search, setSearch] = useState('');
 
   const totals = useMemo(() => {
     const totalAmount = budgets.reduce((acc, budget) => acc + (budget.amount || 0), 0);
@@ -105,106 +120,38 @@ export default function BudgetPage() {
     return { totalAmount, totalCarryover, totalSpent, totalAvailable };
   }, [budgets]);
 
-  const metrics = useMemo(() => {
-    if (budgets.length === 0) {
-      return {
-        budgetCount: 0,
-        overspentCount: 0,
-        averageUtilization: 0,
-        bestBudget: null as null | { name: string; remaining: number; ratio: number; color?: string },
-      };
-    }
-
-    let overspentCount = 0;
-    let utilizationSum = 0;
-    let utilizationDenominator = 0;
-    let best: { name: string; remaining: number; ratio: number; color?: string } | null = null;
-
-    budgets.forEach((budget) => {
-      const totalAvailable = (budget.amount || 0) + (budget.carryover || 0);
-      const spent = budget.spent || 0;
-      const remaining = totalAvailable - spent;
-      if (remaining < 0) {
-        overspentCount += 1;
-      }
-      if (totalAvailable > 0) {
-        const ratio = Math.min(spent / totalAvailable, 1);
-        utilizationSum += ratio;
-        utilizationDenominator += 1;
-        const remainingRatio = remaining / totalAvailable;
-        if (!best || remainingRatio > best.ratio) {
-          best = {
-            name: budget.name,
-            remaining,
-            ratio: remainingRatio,
-            color: budget.color ?? 'blue',
-          };
-        }
-      }
-    });
-
-    const averageUtilization =
-      utilizationDenominator > 0 ? utilizationSum / utilizationDenominator : 0;
-
-    return {
-      budgetCount: budgets.length,
-      overspentCount,
-      averageUtilization,
-      bestBudget: best,
-    };
-  }, [budgets]);
-
-  const sortedBudgets = useMemo(() => {
-    return [...budgets].sort((a, b) => {
-      const totalA = (a.amount || 0) + (a.carryover || 0);
-      const totalB = (b.amount || 0) + (b.carryover || 0);
-      const remainingA = totalA - (a.spent || 0);
-      const remainingB = totalB - (b.spent || 0);
-      const ratioA = totalA > 0 ? remainingA / totalA : -Infinity;
-      const ratioB = totalB > 0 ? remainingB / totalB : -Infinity;
-      return ratioB - ratioA;
-    });
-  }, [budgets]);
-
   const filteredBudgets = useMemo(() => {
-    return sortedBudgets.filter((budget) => {
-      const totalAvailable = (budget.amount || 0) + (budget.carryover || 0);
-      const remaining = totalAvailable - (budget.spent || 0);
-      if (viewFilter === 'overspent') {
-        return remaining < 0;
-      }
-      if (viewFilter === 'healthy') {
-        return remaining >= 0;
-      }
-      return true;
-    });
-  }, [sortedBudgets, viewFilter]);
+    return budgets
+      .filter((budget) => {
+        if (!search.trim()) return true;
+        const query = search.toLowerCase();
+        return (
+          budget.name.toLowerCase().includes(query) ||
+          (budget.category_id ?? '').toLowerCase().includes(query)
+        );
+      })
+      .filter((budget) => {
+        const spent = budget.spent ?? 0;
+        const amount = budget.amount ?? 0;
+        const percent = amount > 0 ? (spent / amount) * 100 : 0;
 
-  const healthyBudgetCount = sortedBudgets.length - metrics.overspentCount;
-
-  const filterSegments = useMemo(
-    () => [
-      { label: `Alle (${sortedBudgets.length})`, value: 'all' },
-      { label: `Im Rahmen (${Math.max(healthyBudgetCount, 0)})`, value: 'healthy' },
-      { label: `Ueberschritten (${metrics.overspentCount})`, value: 'overspent' },
-    ],
-    [sortedBudgets.length, healthyBudgetCount, metrics.overspentCount],
-  );
-
-  const filterDescription = useMemo(() => {
-    switch (viewFilter) {
-      case 'healthy':
-        return 'Zeigt Budgets mit verbleibenden Mitteln.';
-      case 'overspent':
-        return 'Fokussiert Budgets, die ihr Limit ueberschritten haben.';
-      default:
-        return 'Alle aktiven Budgets im Ueberblick.';
-    }
-  }, [viewFilter]);
-
-  const averageUtilizationPercent = Math.round(metrics.averageUtilization * 100);
-  const bestBudget = metrics.bestBudget;
-  const isLoadingEmpty = loading && budgets.length === 0;
+        switch (filter) {
+          case 'healthy':
+            return percent < 80;
+          case 'warning':
+            return percent >= 80 && percent < 100;
+          case 'over':
+            return percent >= 100;
+          default:
+            return true;
+        }
+      })
+      .sort((a, b) => {
+        const percentA = (a.spent ?? 0) / Math.max(a.amount ?? 1, 1);
+        const percentB = (b.spent ?? 0) / Math.max(b.amount ?? 1, 1);
+        return percentB - percentA;
+      });
+  }, [budgets, filter, search]);
 
   const openCreateModal = () => {
     setFormState(INITIAL_FORM);
@@ -218,6 +165,14 @@ export default function BudgetPage() {
     setEditingBudgetId(budget.id);
     setFormError(null);
     setModalOpened(true);
+  };
+
+  const resetForm = () => {
+    setModalOpened(false);
+    setSaving(false);
+    setFormError(null);
+    setFormState(INITIAL_FORM);
+    setEditingBudgetId(null);
   };
 
   const handleSave = async () => {
@@ -237,304 +192,296 @@ export default function BudgetPage() {
     try {
       if (editingBudgetId) {
         await editBudget(editingBudgetId, payload);
+        notifications.show({
+          title: 'Budget aktualisiert',
+          message: 'Dein Budget wurde aktualisiert.',
+          color: 'green',
+        });
       } else {
-        await addBudget({
-          ...payload,
-          period: 'monthly',
-          is_active: true,
-          auto_reset: true,
+        await addBudget(payload);
+        notifications.show({
+          title: 'Budget erstellt',
+          message: 'Neues Budget angelegt.',
+          color: 'green',
         });
       }
       await refresh();
-      setModalOpened(false);
-      setFormState(INITIAL_FORM);
-      setEditingBudgetId(null);
+      resetForm();
     } catch (err) {
-      console.error('Budget speichern fehlgeschlagen:', err);
-      setFormError('Speichern fehlgeschlagen. Bitte versuche es erneut.');
-    } finally {
+      console.error('Budget save failed', err);
       setSaving(false);
+      setFormError('Speichern nicht moeglich. Bitte versuche es erneut.');
     }
   };
 
-  const handleDelete = async (budgetId: string) => {
+  const handleDelete = async (id: string) => {
     try {
-      await removeBudget(budgetId);
+      await removeBudget(id);
+      notifications.show({
+        title: 'Budget geloescht',
+        message: 'Das Budget wurde entfernt.',
+        color: 'green',
+      });
       await refresh();
     } catch (err) {
-      console.error('Budget loeschen fehlgeschlagen:', err);
+      console.error('Delete budget failed', err);
+      notifications.show({
+        title: 'Fehler',
+        message: 'Budget konnte nicht geloescht werden.',
+        color: 'red',
+      });
     }
+  };
+
+  const renderStatusBadge = (budget: FinanzenBudget) => {
+    const spent = budget.spent ?? 0;
+    const amount = Math.max(budget.amount ?? 0, 1);
+    const percent = (spent / amount) * 100;
+
+    if (percent >= 100) {
+      return (
+        <Badge color="red" variant="light" size="sm">
+          Ueberzogen
+        </Badge>
+      );
+    }
+    if (percent >= 80) {
+      return (
+        <Badge color="yellow" variant="light" size="sm">
+          Nahe Limit
+        </Badge>
+      );
+    }
+    return (
+      <Badge color="green" variant="light" size="sm">
+        Im Rahmen
+      </Badge>
+    );
+  };
+
+  const renderBudgetCard = (budget: FinanzenBudget) => {
+    const amount = budget.amount ?? 0;
+    const spent = budget.spent ?? 0;
+    const carryover = budget.carryover ?? 0;
+    const available = amount + carryover - spent;
+    const percent = amount > 0 ? Math.min((spent / amount) * 100, 999) : 0;
+    const color = percent >= 100 ? 'red' : percent >= 80 ? 'yellow' : budget.color ?? 'blue';
+
+    return (
+      <Card key={budget.id} withBorder radius="lg" padding="lg">
+        <Stack gap="md">
+          <Group justify="space-between" align="flex-start">
+            <Group gap="sm" align="flex-start">
+              <ThemeIcon color={budget.color ?? 'blue'} variant="light" radius="md" size="lg">
+                <IconPigMoney size={18} />
+              </ThemeIcon>
+              <Stack gap={4}>
+                <Group gap="xs">
+                  <Text fw={600}>{budget.name}</Text>
+                  {renderStatusBadge(budget)}
+                </Group>
+                <Group gap="sm">
+                  <Text size="sm" c="dimmed">
+                    {formatCurrency(amount)} Budget
+                  </Text>
+                  {carryover > 0 ? (
+                    <Text size="sm" c="dimmed">
+                      + Uebertrag {formatCurrency(carryover)}
+                    </Text>
+                  ) : null}
+                </Group>
+                <Text size="sm" c={available >= 0 ? 'green' : 'red'}>
+                  Verfuegbar: {formatCurrency(available)}
+                </Text>
+                {budget.reset_day ? (
+                  <Text size="xs" c="dimmed">
+                    Reset am {budget.reset_day}. Tag des Monats
+                  </Text>
+                ) : null}
+              </Stack>
+            </Group>
+            <Group gap="xs">
+              <ActionIcon
+                variant="subtle"
+                aria-label="Budget bearbeiten"
+                onClick={() => openEditModal(budget)}
+              >
+                <IconEdit size={16} />
+              </ActionIcon>
+              <ActionIcon
+                variant="subtle"
+                color="red"
+                aria-label="Budget loeschen"
+                onClick={() => handleDelete(budget.id)}
+              >
+                <IconTrash size={16} />
+              </ActionIcon>
+            </Group>
+          </Group>
+
+          <Stack gap={4}>
+            <Group justify="space-between">
+              <Text size="sm" c="dimmed">
+                Ausgaben
+              </Text>
+              <Text size="sm" fw={500}>
+                {formatCurrency(spent)} / {formatCurrency(amount)}
+              </Text>
+            </Group>
+            <Progress value={percent} color={color} radius="xl" />
+          </Stack>
+        </Stack>
+      </Card>
+    );
   };
 
   return (
-    <Container size="xl">
+    <Container size="xl" py="lg">
       <Stack gap="xl">
         <Group justify="space-between" align="flex-start">
-          <Stack gap={4}>
-            <Group gap="sm" align="center">
-              <Title order={1}>Budgets</Title>
-              {refreshing ? (
-                <Badge color="blue" variant="light" size="sm">
-                  Aktualisiere...
-                </Badge>
-              ) : null}
-            </Group>
+          <div>
+            <Title order={2}>Budgets</Title>
             <Text c="dimmed">
-              Verwalte deine monatlichen Rahmen und behalte Ausgaben, Uebertraege und Restbudgets im Blick.
+              Plane deine Ausgaben, beobachte kritische Bereiche und halte deine Ziele im Auge.
             </Text>
-          </Stack>
+          </div>
           <Button leftSection={<IconPlus size={16} />} onClick={openCreateModal}>
-            Budget anlegen
+            Budget erstellen
           </Button>
         </Group>
 
-        <Grid gutter="md">
-          <Grid.Col span={{ base: 12, sm: 6, xl: 3 }}>
-            <Card
-              padding="lg"
-              radius="lg"
-              style={{
-                background: 'linear-gradient(135deg, var(--mantine-color-blue-6), var(--mantine-color-blue-4))',
-                color: 'white',
-              }}
-            >
-              <Stack gap="xs">
-                <ThemeIcon variant="white" color="blue" radius="lg" size="lg" style={{ alignSelf: 'flex-start' }}>
-                  <IconChartPie size={18} />
+        <Card withBorder padding="xl" radius="lg">
+          <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="lg">
+            <Card withBorder padding="md" radius="md">
+              <Group justify="space-between">
+                <Stack gap={4}>
+                  <Text size="xs" c="dimmed">
+                    Gesamtbudget
+                  </Text>
+                  <Text fw={600}>{formatCurrency(totals.totalAmount)}</Text>
+                </Stack>
+                <ThemeIcon color="blue" variant="light" radius="md">
+                  <IconPigMoney size={18} />
                 </ThemeIcon>
-                <Text size="sm" style={{ opacity: 0.75 }}>
-                  Verfuegbar
-                </Text>
-                <Text size="xl" fw={700}>
-                  {formatCurrency(totals.totalAvailable)}
-                </Text>
-                <Text size="xs" style={{ opacity: 0.75 }}>
-                  Nach Abzug aller Ausgaben und Uebertraege
-                </Text>
-              </Stack>
+              </Group>
+              <Text size="xs" c="dimmed" mt="xs">
+                Summe aller Budgetrahmen.
+              </Text>
             </Card>
-          </Grid.Col>
-          <Grid.Col span={{ base: 12, sm: 6, xl: 3 }}>
-            <Card withBorder padding="lg" radius="lg">
-              <Stack gap="xs">
-                <Group justify="space-between">
-                  <ThemeIcon variant="light" color="blue" radius="md">
-                    <IconWallet size={18} />
-                  </ThemeIcon>
-                  <Badge variant="light" color="blue">
-                    {metrics.budgetCount} Budgets
-                  </Badge>
-                </Group>
-                <Text size="sm" c="dimmed">
-                  Gesamtbudget
-                </Text>
-                <Text size="lg" fw={700}>
-                  {formatCurrency(totals.totalAmount)}
-                </Text>
-                <Text size="xs" c="dimmed">
-                  Uebertraege: {formatCurrency(totals.totalCarryover)}
-                </Text>
-              </Stack>
-            </Card>
-          </Grid.Col>
-          <Grid.Col span={{ base: 12, sm: 6, xl: 3 }}>
-            <Card withBorder padding="lg" radius="lg">
-              <Stack gap="xs">
-                <Group justify="space-between">
-                  <ThemeIcon variant="light" color="violet" radius="md">
-                    <IconGauge size={18} />
-                  </ThemeIcon>
-                  <Badge variant="light" color="violet">
-                    {averageUtilizationPercent}%
-                  </Badge>
-                </Group>
-                <Text size="sm" c="dimmed">
-                  Durchschnittliche Nutzung
-                </Text>
-                <Text size="lg" fw={700} c="violet">
-                  {averageUtilizationPercent}%
-                </Text>
-                <Text size="xs" c="dimmed">
-                  Im Mittel genutzter Anteil des Budgets
-                </Text>
-              </Stack>
-            </Card>
-          </Grid.Col>
-          <Grid.Col span={{ base: 12, sm: 6, xl: 3 }}>
-            <Card withBorder padding="lg" radius="lg">
-              <Stack gap="xs">
-                <Group justify="space-between">
-                  <ThemeIcon variant="light" color="red" radius="md">
-                    <IconAlertTriangle size={18} />
-                  </ThemeIcon>
-                  <Badge variant="light" color="red">
-                    {metrics.overspentCount}
-                  </Badge>
-                </Group>
-                <Text size="sm" c="dimmed">
-                  Ueberschrittene Budgets
-                </Text>
-                <Text size="sm">
-                  {metrics.overspentCount > 0
-                    ? 'Bitte pruefe die Ausgaben und passe dein Budget an.'
-                    : 'Alles im gruenen Bereich.'}
-                </Text>
-                <Text size="xs" c="dimmed">
-                  {bestBudget
-                    ? `Bester Rest: ${bestBudget.name} mit ${formatCurrency(bestBudget.remaining)}`
-                    : 'Noch keine positiven Restbudgets.'}
-                </Text>
-              </Stack>
-            </Card>
-          </Grid.Col>
-        </Grid>
 
-        {error ? (
-          <Alert icon={<IconAlertTriangle size={16} />} color="red" variant="light">
-            {error}
-          </Alert>
-        ) : null}
+            <Card withBorder padding="md" radius="md">
+              <Group justify="space-between">
+                <Stack gap={4}>
+                  <Text size="xs" c="dimmed">
+                    Bisher ausgegeben
+                  </Text>
+                  <Text fw={600}>{formatCurrency(totals.totalSpent)}</Text>
+                </Stack>
+                <ThemeIcon color="red" variant="light" radius="md">
+                  <IconTrendingUp size={18} />
+                </ThemeIcon>
+              </Group>
+              <Text size="xs" c="dimmed" mt="xs">
+                Erfasste Ausgaben innerhalb der Budgets.
+              </Text>
+            </Card>
 
-        <Card withBorder radius="md" padding="lg">
-          <Stack gap="lg">
+            <Card withBorder padding="md" radius="md">
+              <Group justify="space-between">
+                <Stack gap={4}>
+                  <Text size="xs" c="dimmed">
+                    Verfuegbar
+                  </Text>
+                  <Text fw={600}>{formatCurrency(totals.totalAvailable)}</Text>
+                </Stack>
+                <ThemeIcon color="teal" variant="light" radius="md">
+                  <IconTargetArrow size={18} />
+                </ThemeIcon>
+              </Group>
+              <Text size="xs" c="dimmed" mt="xs">
+                Budget abzüglich Ausgaben und Ruecklagen.
+              </Text>
+            </Card>
+
+            <Card withBorder padding="md" radius="md">
+              <Group justify="space-between">
+                <Stack gap={4}>
+                  <Text size="xs" c="dimmed">
+                    Uebertraege
+                  </Text>
+                  <Text fw={600}>{formatCurrency(totals.totalCarryover)}</Text>
+                </Stack>
+                <ThemeIcon color="violet" variant="light" radius="md">
+                  <IconDotsVertical size={18} />
+                </ThemeIcon>
+              </Group>
+              <Text size="xs" c="dimmed" mt="xs">
+                Nicht genutzte Mittel aus Vormonaten.
+              </Text>
+            </Card>
+          </SimpleGrid>
+        </Card>
+
+        <Card withBorder padding="lg" radius="lg">
+          <Stack gap="md">
             <Group justify="space-between" align="center">
-              <Stack gap={2}>
-                <Text fw={600}>Budget-Uebersicht</Text>
-                <Text size="sm" c="dimmed">
-                  {filterDescription}
-                </Text>
-              </Stack>
-              <SegmentedControl
-                value={viewFilter}
-                onChange={(value) => setViewFilter(value as BudgetFilter)}
-                data={filterSegments}
+              <Group gap="sm">
+                <SegmentedControl
+                  value={filter}
+                  onChange={(value) => setFilter(value as FilterOption)}
+                  data={FILTER_OPTIONS}
+                />
+              </Group>
+              <TextInput
+                placeholder="Suche nach Namen oder Kategorie"
+                value={search}
+                onChange={(event) => setSearch(event.currentTarget.value)}
+                w={{ base: '100%', sm: 260 }}
               />
             </Group>
 
-            <ScrollArea.Autosize mah={520} offsetScrollbars>
-              <Stack gap="md">
-                {isLoadingEmpty ? (
-                  <Card withBorder radius="md" padding="xl">
-                    <Text c="dimmed" ta="center">
-                      Lade Budgets...
-                    </Text>
-                  </Card>
-                ) : filteredBudgets.length === 0 ? (
-                  <Card withBorder radius="md" padding="xl">
-                    <Stack gap="xs" align="center">
-                      <Text c="dimmed" ta="center">
-                        Keine Budgets fuer diesen Filter vorhanden.
-                      </Text>
-                      {viewFilter !== 'all' ? (
-                        <Button variant="light" size="xs" onClick={() => setViewFilter('all')}>
-                          Alle Budgets anzeigen
-                        </Button>
-                      ) : null}
-                    </Stack>
-                  </Card>
-                ) : (
-                  filteredBudgets.map((budget) => {
-                    const totalAvailable = (budget.amount || 0) + (budget.carryover || 0);
-                    const spent = budget.spent || 0;
-                    const remaining = totalAvailable - spent;
-                    const utilizationPercent =
-                      totalAvailable > 0 ? Math.min((spent / totalAvailable) * 100, 200) : 0;
-                    const utilizationLabel = `${Math.round(utilizationPercent)}%`;
-                    const isOverspent = remaining < 0;
+            {error ? (
+              <Card withBorder padding="md">
+                <Text c="red" size="sm">
+                  Fehler beim Laden der Budgets: {error.message}
+                </Text>
+              </Card>
+            ) : null}
 
-                    return (
-                      <Card key={budget.id} withBorder padding="lg" radius="md">
-                        <Stack gap="md">
-                          <Group justify="space-between" align="flex-start">
-                            <Group gap="sm">
-                              <Indicator
-                                inline
-                                disabled={!isOverspent}
-                                color="red"
-                                size={12}
-                                offset={4}
-                              >
-                                <ThemeIcon variant="light" color={budget.color ?? 'blue'} radius="md" size="lg">
-                                  <Text fw={700}>€</Text>
-                                </ThemeIcon>
-                              </Indicator>
-                              <Stack gap={4}>
-                                <Group gap="xs" align="center">
-                                  <Text fw={600}>{budget.name}</Text>
-                                  <Badge variant="light" color={budget.color ?? 'blue'}>
-                                    {budget.color ?? 'blue'}
-                                  </Badge>
-                                </Group>
-                                <Group gap="sm">
-                                  <Text size="sm" c="dimmed">
-                                    Budget: {formatCurrency(budget.amount || 0)}
-                                  </Text>
-                                  {budget.carryover > 0 ? (
-                                    <Text size="sm" c="dimmed">
-                                      Uebertrag: {formatCurrency(budget.carryover)}
-                                    </Text>
-                                  ) : null}
-                                </Group>
-                                <Group gap="sm">
-                                  <Badge variant="outline" color={remaining >= 0 ? 'green' : 'red'}>
-                                    Rest: {formatCurrency(remaining)}
-                                  </Badge>
-                                  <Text size="sm" c="dimmed">
-                                    Verbraucht: {formatCurrency(spent)}
-                                  </Text>
-                                </Group>
-                                {budget.reset_day ? (
-                                  <Text size="xs" c="dimmed">
-                                    Reset am {budget.reset_day}. Tag des Monats
-                                  </Text>
-                                ) : null}
-                              </Stack>
-                            </Group>
-                            <Group gap="xs">
-                              <Tooltip label="Budget bearbeiten" withArrow>
-                                <ActionIcon variant="subtle" onClick={() => openEditModal(budget)} aria-label="Bearbeiten">
-                                  <IconEdit size={16} />
-                                </ActionIcon>
-                              </Tooltip>
-                              <Tooltip label="Budget entfernen" withArrow>
-                                <ActionIcon
-                                  variant="subtle"
-                                  color="red"
-                                  onClick={() => handleDelete(budget.id)}
-                                  aria-label="Loeschen"
-                                >
-                                  <IconTrash size={16} />
-                                </ActionIcon>
-                              </Tooltip>
-                            </Group>
-                          </Group>
-
-                          <Tooltip label={`Auslastung: ${utilizationLabel}`} withArrow>
-                            <Progress
-                              value={Math.min(utilizationPercent, 150)}
-                              color={budget.color ?? 'blue'}
-                              radius="xl"
-                            />
-                          </Tooltip>
-                        </Stack>
-                      </Card>
-                    );
-                  })
-                )}
-              </Stack>
-            </ScrollArea.Autosize>
+            {loading ? (
+              <Center py="xl">
+                <Text c="dimmed">Budgets werden geladen...</Text>
+              </Center>
+            ) : filteredBudgets.length === 0 ? (
+              <Card withBorder p="xl" radius="md">
+                <Stack gap="sm" align="center">
+                  <Text fw={600}>Keine Budgets gefunden</Text>
+                  <Text c="dimmed" size="sm" ta="center">
+                    Passe die Filter an oder erstelle ein neues Budget.
+                  </Text>
+                </Stack>
+              </Card>
+            ) : (
+              <Grid gutter="xl">
+                {filteredBudgets.map((budget) => (
+                  <Grid.Col key={budget.id} span={{ base: 12, sm: 6, lg: 4 }}>
+                    {renderBudgetCard(budget)}
+                  </Grid.Col>
+                ))}
+              </Grid>
+            )}
           </Stack>
         </Card>
+
       </Stack>
 
       <Modal
         opened={modalOpened}
-        onClose={() => {
-          setModalOpened(false);
-          setFormError(null);
-        }}
+        onClose={resetForm}
         title={editingBudgetId ? 'Budget bearbeiten' : 'Neues Budget erstellen'}
         size="lg"
+        radius="md"
+        centered
       >
         <Stack gap="md">
           {formError ? (
@@ -547,7 +494,10 @@ export default function BudgetPage() {
             label="Name"
             placeholder="z. B. Lebensmittel"
             value={formState.name}
-            onChange={(event) => setFormState((prev) => ({ ...prev, name: event.currentTarget.value }))}
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+              setFormState((prev) => ({ ...prev, name: value }));
+            }}
             required
           />
 
@@ -581,7 +531,7 @@ export default function BudgetPage() {
           />
 
           <Group justify="flex-end" gap="sm" mt="md">
-            <Button variant="light" onClick={() => setModalOpened(false)}>
+            <Button variant="light" onClick={resetForm} disabled={saving}>
               Abbrechen
             </Button>
             <Button onClick={handleSave} loading={saving}>

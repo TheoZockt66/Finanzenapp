@@ -264,16 +264,33 @@ export async function updateTransaction(transactionId: string, userId: string, d
 }
 
 export async function deleteTransaction(transactionId: string, userId: string): Promise<boolean> {
-  const { error } = await supabase
-    .from(FINANZEN_TABLES.TRANSACTIONS)
-    .delete()
-    .eq('id', transactionId)
-    .eq('user_id', userId);
-  if (error) {
-    console.error('Error deleting transaction:', error);
+  try {
+    // Prefer calling a DB-side RPC that adjusts related budget.spent safely and deletes the transaction atomically.
+    const { error: rpcError } = await supabase.rpc('delete_transaction_and_adjust_budget', {
+      p_transaction_id: transactionId,
+      p_user_id: userId,
+    });
+
+    if (rpcError) {
+      console.warn('RPC delete_transaction_and_adjust_budget failed, falling back to client-side delete:', rpcError);
+      // Fallback: rely on DB triggers to adjust budgets correctly. Try a direct delete.
+      const { error } = await supabase
+        .from(FINANZEN_TABLES.TRANSACTIONS)
+        .delete()
+        .eq('id', transactionId)
+        .eq('user_id', userId);
+      if (error) {
+        console.error('Error deleting transaction (fallback):', JSON.stringify(error, null, 2));
+        return false;
+      }
+      return true;
+    }
+
+    return true;
+  } catch (err) {
+    console.error('Unexpected error in deleteTransaction:', err);
     return false;
   }
-  return true;
 }
 // =============================================
 // COST PLANS
@@ -307,9 +324,61 @@ export async function getCostPlansSnapshot(): Promise<FinanzenCostPlansSnapshot>
   const costPlans = Array.isArray(snapshot.costPlans)
     ? (snapshot.costPlans as FinanzenCostPlanWithDetails[])
     : [];
-  const incomeSources = Array.isArray(snapshot.incomeSources)
-    ? (snapshot.incomeSources as FinanzenIncomeSource[])
-    : [];
+  // Normalize income sources to be resilient against older RPC versions
+  const incomeSourcesRaw = Array.isArray(snapshot.incomeSources) ? (snapshot.incomeSources as unknown[]) : [];
+  const incomeSources: FinanzenIncomeSource[] = incomeSourcesRaw.map((srcRaw) => {
+    const src = srcRaw as Record<string, unknown>;
+    const id = String(src['id'] ?? '');
+    const user_id = String(src['user_id'] ?? '');
+
+    // Defensive normalization for cost_plan_id: handle alternate names, numbers, empty strings and literal 'null'
+    const rawPlanId = src['cost_plan_id'] ?? src['plan_id'] ?? src['planId'] ?? src['costPlanId'] ?? null;
+    let cost_plan_id: string | null = null;
+    if (rawPlanId !== null && rawPlanId !== undefined) {
+      const asString = String(rawPlanId).trim();
+      if (asString === '' || asString.toLowerCase() === 'null') {
+        cost_plan_id = null;
+      } else {
+        cost_plan_id = asString;
+      }
+    }
+
+    const name = String(src['name'] ?? '');
+    const amountVal = src['amount'];
+    const amount = typeof amountVal === 'string' ? Number(amountVal) : (typeof amountVal === 'number' ? amountVal : 0);
+    const freqRaw = src['frequency'] as string | undefined;
+    const allowedFrequencies = ['weekly', 'monthly', 'yearly', 'one-time'];
+    const frequency = allowedFrequencies.includes(String(freqRaw)) ? (freqRaw as 'weekly' | 'monthly' | 'yearly' | 'one-time') : 'monthly';
+    const is_active = Boolean(src['is_active'] ?? src['active'] ?? true);
+    const start_date = src['start_date'] as string | undefined;
+    const end_date = src['end_date'] as string | undefined;
+    const description = src['description'] as string | undefined;
+    const created_at = src['created_at'] as string | undefined;
+    const updated_at = src['updated_at'] as string | undefined;
+
+    // Debugging: show when plan association is missing to help diagnose
+    // (kept as console.debug so it doesn't spam production logs easily)
+    try {
+      if (!cost_plan_id) {
+        console.debug('getCostPlansSnapshot: income source without cost_plan_id', { id, name, rawPlanId });
+      }
+    } catch {}
+
+    return {
+      id,
+      user_id,
+      cost_plan_id,
+      name,
+      amount,
+      frequency,
+      is_active,
+      start_date: start_date ?? '',
+      end_date: end_date,
+      description: description,
+      created_at: created_at ?? new Date().toISOString(),
+      updated_at: updated_at ?? new Date().toISOString(),
+    } as FinanzenIncomeSource;
+  });
 
   return {
     costPlans,
@@ -766,18 +835,76 @@ export async function getIncomeSourcesByUser(userId: string): Promise<FinanzenIn
 }
 
 export async function createIncomeSource(data: CreateIncomeSourceData): Promise<FinanzenIncomeSource> {
-  const { data: result, error } = await supabase
-    .from(FINANZEN_TABLES.INCOME_SOURCES)
-    .insert(data)
-    .select()
-    .single();
+  // Normalize cost_plan_id: don't insert empty string
+  const payload = { ...data, cost_plan_id: data.cost_plan_id === '' ? null : data.cost_plan_id } as CreateIncomeSourceData;
+  console.log('createIncomeSource payload:', JSON.stringify(payload));
+  // Pre-check: ensure there's no existing income source with same name for this plan & user
+  try {
+    if (payload.user_id && payload.cost_plan_id) {
+      const { data: existing, error: existsErr } = await supabase
+        .from(FINANZEN_TABLES.INCOME_SOURCES)
+        .select('id')
+        .eq('user_id', payload.user_id)
+        .eq('cost_plan_id', payload.cost_plan_id)
+        .eq('name', payload.name)
+        .single();
 
-  if (error) {
-    console.error('Error creating income source:', error);
-    throw error;
+      if (existsErr == null && existing) {
+        const dupErr = new Error('duplicate') as unknown as Record<string, unknown>;
+        dupErr['code'] = 'DUPLICATE_NAME';
+        throw dupErr;
+      }
+      // if existsErr is present but not PGRST116 (not found), ignore and continue to attempt insert
+    }
+  } catch (precheckErr) {
+    // If duplicate detected, surface a clear error
+    if (precheckErr && typeof precheckErr === 'object' && 'code' in (precheckErr as Record<string, unknown>) && (precheckErr as Record<string, unknown>)['code'] === 'DUPLICATE_NAME') {
+      throw precheckErr;
+    }
+    // otherwise continue; we'll let insert attempt report DB errors
   }
 
-  return result;
+  const attemptInsert = async (p: CreateIncomeSourceData) => {
+    const { data: result, error } = await supabase
+      .from(FINANZEN_TABLES.INCOME_SOURCES)
+      .insert(p)
+      .select()
+      .single();
+    return { result, error } as { result?: FinanzenIncomeSource; error?: unknown };
+  };
+
+  // First attempt
+  const { result: firstResult, error: firstError } = await attemptInsert(payload);
+  if (firstError) {
+    // Handle duplicate-name unique constraint for income sources per plan by retrying with timestamp suffix
+      try {
+      const info = (firstError && typeof firstError === 'object') ? (firstError as Record<string, unknown>) : {};
+      const errCode = (info['code'] ?? info['status']) ?? null;
+      const errMsg = String(info['message'] ?? info['details'] ?? '');
+      console.error('Error creating income source on first attempt:', JSON.stringify(firstError, null, 2));
+
+      if ((errCode === '23505' || errCode === 23505) && errMsg.includes('finanzen_income_sources_unique_plan_name')) {
+        console.log('\u{1F504} Duplicate income source name detected for plan; retrying with timestamp suffix');
+        const timestamp = new Date().getTime();
+        const modified: CreateIncomeSourceData = { ...payload, name: `${payload.name} (${timestamp})` };
+        const retry = await attemptInsert(modified);
+        if (retry.error) {
+          console.error('Retry creating income source failed:', JSON.stringify(retry.error, null, 2));
+          throw retry.error;
+        }
+        console.log('createIncomeSource retry result:', retry.result);
+        return retry.result as FinanzenIncomeSource;
+      }
+    } catch (retryErr) {
+      console.error('Error during retry logic for createIncomeSource:', retryErr);
+      throw retryErr;
+    }
+    // If not handled above, throw original error
+    throw firstError;
+  }
+
+  console.log('createIncomeSource result:', firstResult);
+  return firstResult as FinanzenIncomeSource;
 }
 
 export async function updateIncomeSource(sourceId: string, userId: string, data: UpdateIncomeSourceData): Promise<FinanzenIncomeSource> {

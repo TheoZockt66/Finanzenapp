@@ -28,6 +28,7 @@ const navLinks = [
   { label: 'Budget', href: '/budget' },
   { label: 'Transaktionen', href: '/transactions' },
   { label: 'Kosten', href: '/costs' },
+  { label: 'Kredit', href: '/kredit' },
 ];
 
 export function Header() {

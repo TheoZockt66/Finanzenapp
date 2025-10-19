@@ -199,10 +199,12 @@ export default function CostsPage() {
   const [planForm, setPlanForm] = useState({ id: '', name: '', description: '' });
   const [editingPlan, setEditingPlan] = useState(false);
 
-  // Set initial active plan
-  if (!activePlanId && costPlans.length > 0) {
-    setActivePlanId(costPlans[0].id);
-  }
+  // Set initial active plan after costPlans load (useEffect avoids render-order race)
+  useEffect(() => {
+    if (!activePlanId && costPlans.length > 0) {
+      setActivePlanId(costPlans[0].id);
+    }
+  }, [costPlans, activePlanId]);
 
   const activePlan = costPlans.find(p => p.id === activePlanId) || costPlans[0];
   const costItems = activePlan?.costItems || [];
@@ -269,21 +271,21 @@ export default function CostsPage() {
     }
   }
 
-  const fallbackPlanId = costPlans[0]?.id ?? '';
-  const planIncomeSources = useMemo(
-    () =>
-      incomeSources.filter((source) => {
-        if (source.cost_plan_id) {
-          return source.cost_plan_id === activePlanId;
-        }
-        return fallbackPlanId && activePlanId === fallbackPlanId;
-      }),
-    [incomeSources, activePlanId, fallbackPlanId]
-  );
-  const unassignedIncomeSources = useMemo(
-    () => incomeSources.filter((source) => !source.cost_plan_id),
-    [incomeSources]
-  );
+  // Only show income sources that belong to the currently active plan.
+  // Use string coercion to avoid mismatches between null/undefined and string UUIDs.
+  const planIncomeSources = useMemo(() => {
+    const activeKey = String(activePlanId ?? '');
+    const matched = incomeSources.filter((source) => String(source.cost_plan_id ?? '') === activeKey);
+    // Debug to help diagnose missing assignments
+    try {
+      console.debug('CostsPage: activePlanId', activePlanId, 'matched income sources', matched.length);
+    } catch {
+      /* ignore */
+    }
+    return matched;
+  }, [incomeSources, activePlanId]);
+
+  const unassignedIncomeSources = useMemo(() => incomeSources.filter((source) => !source.cost_plan_id || String(source.cost_plan_id) === ''), [incomeSources]);
 
   const isInitialLoading = loading && costPlans.length === 0 && incomeSources.length === 0;
 
@@ -786,7 +788,7 @@ export default function CostsPage() {
                 {planIncomeSources.length === 0 ? (
                   <Stack gap="xs" align="center" py="lg">
                     <Text ta="center" c="dimmed">Noch keine Einkommensquellen vorhanden</Text>
-                    {unassignedIncomeSources.length > 0 && activePlanId !== fallbackPlanId ? (
+                    {unassignedIncomeSources.length > 0 ? (
                       <Text size="sm" c="dimmed" ta="center">
                         {unassignedIncomeSources.length} Einnahme{unassignedIncomeSources.length === 1 ? '' : 'n'} sind noch keinem Plan zugeordnet.
                         Weise sie beim Bearbeiten einem Plan zu, damit sie hier erscheinen.
@@ -1066,25 +1068,6 @@ export default function CostsPage() {
             required
             withAsterisk
             description="Welchem Kostenplan soll dieses Einkommen zugeordnet werden?"
-          />
-          
-          <TextInput
-            label="Startdatum"
-            type="date"
-            value={incomeForm.start_date}
-            onChange={(e) => setIncomeForm(prev => ({ ...prev, start_date: e.target.value }))}
-            required
-            withAsterisk
-            description="Ab wann ist dieses Einkommen gültig?"
-          />
-          
-          <TextInput
-            label="Enddatum (optional)"
-            type="date"
-            value={incomeForm.end_date}
-            onChange={(e) => setIncomeForm(prev => ({ ...prev, end_date: e.target.value }))}
-            placeholder="tt.mm.jjjj"
-            description="Lassen Sie dieses Feld leer, wenn das Einkommen unbefristet ist"
           />
           
           <TextInput

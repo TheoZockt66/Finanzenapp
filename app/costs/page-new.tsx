@@ -727,19 +727,7 @@ export default function CostsPage() {
             data={costPlans.map(plan => ({ value: plan.id, label: plan.name }))}
             required
           />
-          <TextInput
-            label="Startdatum"
-            type="date"
-            value={incomeForm.start_date}
-            onChange={(e) => setIncomeForm(prev => ({ ...prev, start_date: e.target.value }))}
-            required
-          />
-          <TextInput
-            label="Enddatum (optional)"
-            type="date"
-            value={incomeForm.end_date}
-            onChange={(e) => setIncomeForm(prev => ({ ...prev, end_date: e.target.value }))}
-          />
+          {/* Startdatum and Enddatum removed per UX request; start_date will be set automatically */}
           <TextInput
             label="Beschreibung"
             value={incomeForm.description}

@@ -573,14 +573,16 @@ export default function TransactionsPage() {
                     />
                   </Grid.Col>
                   <Grid.Col span={{ base: 12, md: 4, lg: 6 }}>
-                    <TextInput
-                      label="Suche in Beschreibung"
-                      placeholder="z. B. Einkaufen"
-                      value={filters.search}
-                      onChange={(event) =>
-                        setFilters((prev) => ({ ...prev, search: event.currentTarget.value }))
-                      }
-                    />
+                      <TextInput
+                        label="Suche in Beschreibung"
+                        placeholder="z. B. Einkaufen"
+                        value={filters.search}
+                        onChange={(event) => {
+                          // protect against React's pooled synthetic events being nullified
+                          const v = event?.currentTarget?.value ?? '';
+                          setFilters((prev) => ({ ...prev, search: v }));
+                        }}
+                      />
                   </Grid.Col>
                 </Grid>
               </Collapse>
@@ -845,7 +847,10 @@ export default function TransactionsPage() {
             label="Beschreibung"
             placeholder="Kurzbeschreibung"
             value={formState.description}
-            onChange={(event) => setFormState((prev) => ({ ...prev, description: event.currentTarget.value }))}
+            onChange={(event) => {
+              const v = event?.currentTarget?.value ?? '';
+              setFormState((prev) => ({ ...prev, description: v }));
+            }}
           />
           <DatePickerInput
             label="Datum"
@@ -876,7 +881,10 @@ export default function TransactionsPage() {
           <TextInput
             label="Name"
             value={categoryDraft.name}
-            onChange={(event) => setCategoryDraft((prev) => ({ ...prev, name: event.currentTarget.value }))}
+            onChange={(event) => {
+              const v = event?.currentTarget?.value ?? '';
+              setCategoryDraft((prev) => ({ ...prev, name: v }));
+            }}
             required
           />
           <Select
