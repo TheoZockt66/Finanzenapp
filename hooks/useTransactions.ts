@@ -130,12 +130,17 @@ export function useTransactions() {
     return success;
   };
 
+  const refresh = useCallback(
+    () => loadTransactions({ skipLoading: transactionsRef.current.length > 0 }),
+    [loadTransactions],
+  );
+
   return {
     transactions,
     loading,
     refreshing,
     error,
-    refresh: () => loadTransactions({ skipLoading: transactionsRef.current.length > 0 }),
+    refresh,
     addTransaction,
     editTransaction,
     removeTransaction,

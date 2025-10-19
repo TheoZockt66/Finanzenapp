@@ -122,12 +122,17 @@ export function useBudgets() {
     return success;
   };
 
+  const refresh = useCallback(
+    () => loadBudgets({ skipLoading: budgetsRef.current.length > 0 }),
+    [loadBudgets],
+  );
+
   return {
     budgets,
     loading,
     refreshing,
     error,
-    refresh: () => loadBudgets({ skipLoading: budgetsRef.current.length > 0 }),
+    refresh,
     addBudget,
     editBudget,
     removeBudget,

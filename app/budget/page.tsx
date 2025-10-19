@@ -443,7 +443,8 @@ export default function BudgetPage() {
             {error ? (
               <Card withBorder padding="md">
                 <Text c="red" size="sm">
-                  Fehler beim Laden der Budgets: {error.message}
+                  Fehler beim Laden der Budgets:{' '}
+                  {typeof error === 'string' ? error : error.message ?? 'Unbekannter Fehler'}
                 </Text>
               </Card>
             ) : null}
