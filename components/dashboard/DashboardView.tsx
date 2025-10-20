@@ -40,6 +40,7 @@ import {
 } from '@tabler/icons-react';
 import { showNotification } from '@mantine/notifications';
 import dayjs from 'dayjs';
+import { useMediaQuery } from '@mantine/hooks';
 import { useTransactions } from '../../hooks/useTransactions';
 import { useBudgets } from '../../hooks/useBudgets';
 import { useTransactionCategories } from '../../hooks/useTransactionCategories';
@@ -70,6 +71,8 @@ export function DashboardView() {
   const { transactions, loading: txLoading, refresh: refreshTx, removeTransaction } = useTransactions();
   const { budgets, loading: budgetsLoading, refresh: refreshBudgets } = useBudgets();
   const { categories, loading: categoriesLoading } = useTransactionCategories();
+  const isMobile = useMediaQuery('(max-width: 768px)');
+  const isLandscape = useMediaQuery('(max-width: 960px) and (max-height: 620px)');
 
   const [timeframe, setTimeframe] = useState<TimeframeOption>('this_month');
 
@@ -203,7 +206,7 @@ export function DashboardView() {
 
   if (loading) {
     return (
-      <Container size="xl" py="lg">
+      <Container size={isMobile ? '100%' : 'xl'} py="lg" px={isMobile ? 'sm' : undefined}>
         <Center h={320}>
           <Stack gap="sm" align="center">
             <Loader size="lg" />
@@ -215,26 +218,37 @@ export function DashboardView() {
   }
 
   return (
-    <Container size="xl" py="lg">
-      <Stack gap="xl">
-        <Group justify="space-between" align="flex-start">
-          <Stack gap={4}>
+    <Container size={isMobile ? '100%' : 'xl'} py="lg" px={isMobile ? 'sm' : undefined}>
+      <Stack gap={isMobile ? 'lg' : 'xl'}>
+        <Group
+          justify="space-between"
+          align={isMobile ? 'stretch' : 'flex-start'}
+          wrap={isMobile ? 'wrap' : 'nowrap'}
+          gap={isMobile ? 'md' : 'sm'}
+        >
+          <Stack gap={4} style={{ flex: isMobile ? '1 1 100%' : undefined }}>
             <Title order={2}>Finanzuebersicht</Title>
             <Text c="dimmed">
               Schneller Einblick in deine Einnahmen, Ausgaben und Budgets ({timeframeLabel}).
             </Text>
           </Stack>
-          <Stack gap="sm" align="flex-end">
+          <Stack
+            gap="sm"
+            align={isMobile ? 'stretch' : 'flex-end'}
+            style={{ flex: isMobile ? '1 1 100%' : undefined }}
+          >
             <SegmentedControl
               value={timeframe}
               onChange={(value) => setTimeframe(value as TimeframeOption)}
               data={TIMEFRAME_OPTIONS}
               size="sm"
+              fullWidth={isMobile}
             />
-            <Group gap="sm">
+            <Group gap="sm" justify={isMobile ? 'stretch' : 'flex-end'} wrap="wrap">
               <Button
                 leftSection={<IconPlus size={16} />}
                 onClick={() => (window.location.href = '/transactions')}
+                fullWidth={isMobile}
               >
                 Neue Transaktion
               </Button>
@@ -242,6 +256,7 @@ export function DashboardView() {
                 leftSection={<IconPlus size={16} />}
                 variant="light"
                 onClick={() => (window.location.href = '/costs')}
+                fullWidth={isMobile}
               >
                 Neuer Plan
               </Button>
@@ -504,7 +519,7 @@ export function DashboardView() {
               </Text>
             ) : (
               <Box>
-                <ScrollArea.Autosize mah={360} offsetScrollbars>
+                <ScrollArea.Autosize mah={isLandscape ? 240 : 360} offsetScrollbars>
                   <Table highlightOnHover horizontalSpacing="md" verticalSpacing="sm">
                     <Table.Thead>
                       <Table.Tr>

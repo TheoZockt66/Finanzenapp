@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { notifications } from '@mantine/notifications';
 import {
   ActionIcon,
   Badge,
@@ -10,6 +11,7 @@ import {
   Container,
   Divider,
   Group,
+  Loader,
   Modal,
   NumberInput,
   Progress,
@@ -38,6 +40,13 @@ import {
   IconTrash,
 } from '@tabler/icons-react';
 import dayjs from 'dayjs';
+import { useMediaQuery } from '@mantine/hooks';
+import { useCredits } from '../../hooks/useCredits';
+import type {
+  CreateCreditLoanData,
+  CreateCreditRepaymentData,
+  FinanzenCreditLoanWithRepayments,
+} from '../../lib/types';
 
 type LoanRole = 'borrower' | 'lender';
 type PaymentFrequency = 'monthly' | 'bi-monthly' | 'quarterly' | 'yearly';
@@ -61,14 +70,14 @@ type ScheduleEntry = {
   remaining: number;
 };
 
-type Repayment = {
+type LoanViewRepayment = {
   id: string;
   amount: number;
   date: string;
   note?: string;
 };
 
-type Loan = {
+type LoanView = {
   id: string;
   title: string;
   role: LoanRole;
@@ -78,7 +87,7 @@ type Loan = {
   frequency: PaymentFrequency;
   startDate: string;
   description?: string;
-  repayments: Repayment[];
+  repayments: LoanViewRepayment[];
   createdAt: string;
 };
 
@@ -147,14 +156,7 @@ function formatNumber(value: number) {
   return numberFormatter.format(Number(value.toFixed(2)));
 }
 
-function generateId(prefix: string) {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return (crypto as { randomUUID: () => string }).randomUUID();
-  }
-  return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function generateSchedule(loan: Loan): ScheduleEntry[] {
+function generateSchedule(loan: LoanView): ScheduleEntry[] {
   const config = FREQUENCY_CONFIG[loan.frequency];
   const ratePerPeriod = loan.interestRate > 0 ? (loan.interestRate / 100) / config.periodsPerYear : 0;
   const totalPeriods = Math.max(1, Math.round((loan.termMonths / 12) * config.periodsPerYear));
@@ -194,16 +196,73 @@ function generateSchedule(loan: Loan): ScheduleEntry[] {
   return schedule;
 }
 
+function normalizeLoan(loan: FinanzenCreditLoanWithRepayments): LoanView {
+  return {
+    id: loan.id,
+    title: loan.title,
+    role: loan.role as LoanRole,
+    principal: loan.principal,
+    interestRate: loan.interest_rate,
+    termMonths: loan.term_months,
+    frequency: loan.frequency as PaymentFrequency,
+    startDate: loan.start_date,
+    description: loan.description ?? '',
+    createdAt: loan.created_at,
+    repayments: loan.repayments
+      .slice()
+      .sort((a, b) => (b.payment_date ?? '').localeCompare(a.payment_date ?? ''))
+      .map((repayment) => ({
+        id: repayment.id,
+        amount: repayment.amount,
+        date: repayment.payment_date,
+        note: repayment.note ?? '',
+      })),
+  };
+}
 export default function KreditPage() {
-  const [loans, setLoans] = useState<Loan[]>([]);
+  const {
+    loans: creditLoans,
+    loading,
+    refreshing,
+    error,
+    addLoan,
+    editLoan,
+    removeLoan,
+    addRepayment,
+    removeRepayment,
+  } = useCredits();
+  const isMobile = useMediaQuery('(max-width: 768px)');
+  const isLandscape = useMediaQuery('(max-width: 960px) and (max-height: 620px)');
+
   const [loanModalOpen, setLoanModalOpen] = useState(false);
   const [loanForm, setLoanForm] = useState<LoanFormState>(initialLoanForm);
   const [formErrors, setFormErrors] = useState<FormErrors>({});
   const [repaymentForm, setRepaymentForm] = useState<RepaymentFormState>(initialRepaymentForm);
   const [expandedLoans, setExpandedLoans] = useState<Record<string, boolean>>({});
+  const [editingLoanId, setEditingLoanId] = useState<string | null>(null);
+
+  const normalizedLoans = useMemo<LoanView[]>(
+    () => creditLoans.map((loan) => normalizeLoan(loan)),
+    [creditLoans],
+  );
+
+  useEffect(() => {
+    if (normalizedLoans.length === 0) return;
+    setExpandedLoans((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      normalizedLoans.forEach((loan) => {
+        if (!(loan.id in next)) {
+          next[loan.id] = true;
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [normalizedLoans]);
 
   const loansWithDerivedData = useMemo(() => {
-    return loans.map((loan) => {
+    return normalizedLoans.map((loan) => {
       const schedule = generateSchedule(loan);
       const totalInterest = schedule.reduce((acc, entry) => acc + entry.interest, 0);
       const plannedTotal = schedule.reduce((acc, entry) => acc + entry.payment, 0);
@@ -212,7 +271,7 @@ export default function KreditPage() {
       const outstandingPrincipal = Math.max(0, loan.principal - totalRepayments);
       const outstandingPlanned = Math.max(0, loan.principal + totalInterest - totalRepayments);
       const nextInstallment = schedule.find((entry) =>
-        dayjs(entry.dueDate).isAfter(dayjs().subtract(1, 'day')) && entry.remaining > 0
+        dayjs(entry.dueDate).isAfter(dayjs().subtract(1, 'day')) && entry.remaining > 0,
       );
       const suggestedAmount = nextInstallment ? nextInstallment.payment : outstandingPrincipal;
       const status = totalRepayments >= loan.principal ? 'done' : 'active';
@@ -231,15 +290,29 @@ export default function KreditPage() {
         status,
       };
     });
-  }, [loans]);
-
-  const handleOpenLoanModal = () => {
-    setLoanForm({ ...initialLoanForm, startDate: new Date() });
+  }, [normalizedLoans]);
+  const handleOpenLoanModal = (loan?: LoanView) => {
+    if (loan) {
+      setLoanForm({
+        title: loan.title,
+        role: loan.role,
+        principal: loan.principal,
+        interestRate: loan.interestRate,
+        termMonths: loan.termMonths,
+        frequency: loan.frequency,
+        startDate: dayjs(loan.startDate).toDate(),
+        description: loan.description ?? '',
+      });
+      setEditingLoanId(loan.id);
+    } else {
+      setLoanForm({ ...initialLoanForm, startDate: new Date() });
+      setEditingLoanId(null);
+    }
     setFormErrors({});
     setLoanModalOpen(true);
   };
 
-  const handleCreateLoan = () => {
+  const handleCreateLoan = async () => {
     const errors: FormErrors = {};
 
     if (!loanForm.title.trim()) {
@@ -263,25 +336,51 @@ export default function KreditPage() {
       return;
     }
 
-    const newLoan: Loan = {
-      id: generateId('loan'),
+    const payload: CreateCreditLoanData = {
       title: loanForm.title.trim(),
       role: loanForm.role,
       principal: Number(loanForm.principal),
-      interestRate: Number(loanForm.interestRate),
-      termMonths: Number(loanForm.termMonths),
+      interest_rate: Number(loanForm.interestRate),
+      term_months: Math.max(1, Math.trunc(loanForm.termMonths)),
       frequency: loanForm.frequency,
-      startDate: (loanForm.startDate ?? new Date()).toISOString(),
-      description: loanForm.description.trim(),
-      repayments: [],
-      createdAt: new Date().toISOString(),
+      start_date: (loanForm.startDate ?? new Date()).toISOString().split('T')[0],
+      description: loanForm.description.trim() || undefined,
     };
 
-    setLoans((prev) => [newLoan, ...prev]);
-    setExpandedLoans((prev) => ({ ...prev, [newLoan.id]: true }));
-    setLoanModalOpen(false);
-    setLoanForm({ ...initialLoanForm, startDate: new Date() });
-    setFormErrors({});
+    try {
+      if (editingLoanId) {
+        const updated = await editLoan(editingLoanId, payload);
+        if (updated) {
+          setExpandedLoans((prev) => ({ ...prev, [editingLoanId]: true }));
+          notifications.show({
+            title: 'Kredit aktualisiert',
+            message: 'Die Kreditdaten wurden gespeichert.',
+            color: 'green',
+          });
+        }
+      } else {
+        const created = await addLoan(payload);
+        if (created) {
+          notifications.show({
+            title: 'Kredit gespeichert',
+            message: 'Der Kredit wurde erfolgreich angelegt.',
+            color: 'green',
+          });
+          setExpandedLoans((prev) => ({ ...prev, [created.id]: true }));
+        }
+      }
+      setLoanModalOpen(false);
+      setLoanForm({ ...initialLoanForm, startDate: new Date() });
+      setFormErrors({});
+      setEditingLoanId(null);
+    } catch (err) {
+      console.error('Create loan failed:', err);
+      notifications.show({
+        title: 'Fehler',
+        message: 'Der Kredit konnte nicht gespeichert werden.',
+        color: 'red',
+      });
+    }
   };
 
   const handleOpenRepaymentModal = (loanId: string) => {
@@ -295,10 +394,11 @@ export default function KreditPage() {
       amount: defaultAmount,
       date: new Date(),
       note: '',
+      error: undefined,
     });
   };
 
-  const handleAddRepayment = () => {
+  const handleAddRepayment = async () => {
     if (!repaymentForm.loanId) {
       return;
     }
@@ -313,52 +413,76 @@ export default function KreditPage() {
       return;
     }
 
-    const newRepayment: Repayment = {
-      id: generateId('rep'),
+    const payload: CreateCreditRepaymentData = {
+      loan_id: repaymentForm.loanId,
       amount: Number(repaymentForm.amount),
-      date: repaymentForm.date.toISOString(),
-      note: repaymentForm.note.trim(),
+      payment_date: repaymentForm.date.toISOString().split('T')[0],
+      note: repaymentForm.note.trim() || undefined,
     };
 
-    setLoans((prev) =>
-      prev.map((loan) => {
-        if (loan.id !== repaymentForm.loanId) {
-          return loan;
-        }
-
-        const repayments = [...loan.repayments, newRepayment].sort(
-          (a, b) => dayjs(b.date).valueOf() - dayjs(a.date).valueOf()
-        );
-
-        return {
-          ...loan,
-          repayments,
-        };
-      })
-    );
-
-    setRepaymentForm(initialRepaymentForm);
+    try {
+      const created = await addRepayment(payload);
+      if (created) {
+        notifications.show({
+          title: 'Teilzahlung gespeichert',
+          message: 'Die Teilzahlung wurde erfasst.',
+          color: 'green',
+        });
+        setRepaymentForm(initialRepaymentForm);
+      }
+    } catch (err) {
+      console.error('Add repayment failed:', err);
+      notifications.show({
+        title: 'Fehler',
+        message: 'Teilzahlung konnte nicht gespeichert werden.',
+        color: 'red',
+      });
+    }
   };
 
-  const handleRemoveRepayment = (loanId: string, repaymentId: string) => {
-    setLoans((prev) =>
-      prev.map((loan) => {
-        if (loan.id !== loanId) {
-          return loan;
-        }
-
-        return {
-          ...loan,
-          repayments: loan.repayments.filter((rep) => rep.id !== repaymentId),
-        };
-      })
-    );
+  const handleRemoveRepayment = async (loanId: string, repaymentId: string) => {
+    try {
+      const success = await removeRepayment(loanId, repaymentId);
+      if (success) {
+        notifications.show({
+          title: 'Teilzahlung entfernt',
+          message: 'Die Teilzahlung wurde geloescht.',
+          color: 'green',
+        });
+      }
+    } catch (err) {
+      console.error('Remove repayment failed:', err);
+      notifications.show({
+        title: 'Fehler',
+        message: 'Teilzahlung konnte nicht entfernt werden.',
+        color: 'red',
+      });
+    }
   };
 
   const closeRepaymentModal = () => {
     setRepaymentForm(initialRepaymentForm);
   };
 
+  const handleDeleteLoan = async (loanId: string) => {
+    try {
+      const success = await removeLoan(loanId);
+      if (success) {
+        notifications.show({
+          title: 'Kredit gelöscht',
+          message: 'Der Kredit wurde entfernt.',
+          color: 'green',
+        });
+      }
+    } catch (err) {
+      console.error('Delete loan failed:', err);
+      notifications.show({
+        title: 'Fehler',
+        message: 'Kredit konnte nicht gelöscht werden.',
+        color: 'red',
+      });
+    }
+  };
   const roleBadge = (role: LoanRole) => {
     if (role === 'borrower') {
       return (
@@ -389,27 +513,58 @@ export default function KreditPage() {
     );
   };
 
-  const toggleLoanExpanded = (id: string) => {
-    setExpandedLoans((prev) => ({
-      ...prev,
-      [id]: !(prev[id] ?? true),
-    }));
-  };
-
+  if (loading) {
+    return (
+      <Container size={isMobile ? '100%' : 'xl'} py="lg" px={isMobile ? 'sm' : undefined}>
+        <Group justify="center" align="center" h={isLandscape ? 220 : 320}>
+          <Loader size="lg" />
+          <Text c="dimmed">Kredite werden geladen...</Text>
+        </Group>
+      </Container>
+    );
+  }
   return (
-    <Container size="xl">
-      <Stack gap="xl">
-        <Group justify="space-between" align="flex-end">
-          <div>
+    <Container size={isMobile ? '100%' : 'xl'} py="lg" px={isMobile ? 'sm' : undefined}>
+      <Stack gap={isMobile ? 'lg' : 'xl'}>
+        <Group
+          justify="space-between"
+          align={isMobile ? 'stretch' : 'flex-start'}
+          wrap={isMobile ? 'wrap' : 'nowrap'}
+          gap="md"
+        >
+          <div style={{ flex: isMobile ? '1 1 100%' : undefined }}>
             <Title order={1}>Kredite</Title>
             <Text c="dimmed">
               Verwalte vergebene oder aufgenommene Kredite, plane Raten und erfasse Teilzahlungen.
             </Text>
           </div>
-          <Button leftSection={<IconPlus size={16} />} onClick={handleOpenLoanModal}>
-            Kredit anlegen
-          </Button>
+          <Stack
+            direction={isMobile ? 'column' : 'row'}
+            gap="sm"
+            align={isMobile ? 'stretch' : 'flex-end'}
+            style={{ flex: isMobile ? '1 1 100%' : undefined }}
+          >
+            {refreshing ? (
+              <Badge color="blue" variant="light" w={isMobile ? '100%' : undefined}>
+                Aktualisiere...
+              </Badge>
+            ) : null}
+            <Button leftSection={<IconPlus size={16} />} onClick={() => handleOpenLoanModal()} fullWidth={isMobile}>
+              Kredit anlegen
+            </Button>
+          </Stack>
         </Group>
+
+        {error ? (
+          <Card
+            withBorder
+            padding="md"
+            radius="md"
+            style={{ borderColor: 'var(--mantine-color-red-6)' }}
+          >
+            <Text c="red">{error}</Text>
+          </Card>
+        ) : null}
 
         {loansWithDerivedData.length === 0 ? (
           <Card withBorder padding="xl" radius="md">
@@ -419,7 +574,7 @@ export default function KreditPage() {
               <Text c="dimmed" ta="center">
                 Lege deinen ersten Kredit an, um einen Tilgungsplan zu berechnen und Zahlungen festzuhalten.
               </Text>
-              <Button leftSection={<IconPlus size={16} />} onClick={handleOpenLoanModal}>
+              <Button leftSection={<IconPlus size={16} />} onClick={() => handleOpenLoanModal()} fullWidth={isMobile}>
                 Jetzt Kredit erstellen
               </Button>
             </Stack>
@@ -442,7 +597,12 @@ export default function KreditPage() {
               }) => (
                 <Card key={loan.id} withBorder padding="xl" radius="md">
                   <Stack gap="md">
-                    <Group justify="space-between" align="center">
+                    <Group
+                      justify="space-between"
+                      align={isMobile ? 'stretch' : 'center'}
+                      wrap={isMobile ? 'wrap' : 'nowrap'}
+                      gap="sm"
+                    >
                       <div>
                         <Group gap="sm">
                           <Title order={3}>{loan.title}</Title>
@@ -453,17 +613,39 @@ export default function KreditPage() {
                           Erstellt am {dayjs(loan.createdAt).format('DD.MM.YYYY')}
                         </Text>
                       </div>
-                      <Group gap="sm">
+                      <Group gap="sm" justify={isMobile ? 'space-between' : 'flex-end'} wrap="wrap">
                         <Button
                           variant="light"
                           leftSection={<IconPlus size={16} />}
                           onClick={() => handleOpenRepaymentModal(loan.id)}
+                          fullWidth={isMobile}
                         >
                           Teilzahlung erfassen
                         </Button>
+                        <Button
+                          variant="outline"
+                          leftSection={<IconPencil size={16} />}
+                          onClick={() => handleOpenLoanModal(loan)}
+                          fullWidth={isMobile}
+                        >
+                          Kredit bearbeiten
+                        </Button>
+                        <ActionIcon
+                          variant="light"
+                          color="red"
+                          onClick={() => void handleDeleteLoan(loan.id)}
+                          title="Kredit löschen"
+                        >
+                          <IconTrash size={16} />
+                        </ActionIcon>
                         <ActionIcon
                           variant="subtle"
-                          onClick={() => toggleLoanExpanded(loan.id)}
+                          onClick={() =>
+                            setExpandedLoans((prev) => ({
+                              ...prev,
+                              [loan.id]: !(prev[loan.id] ?? true),
+                            }))
+                          }
                           title={expandedLoans[loan.id] ?? true ? 'Details einklappen' : 'Details anzeigen'}
                         >
                           {(expandedLoans[loan.id] ?? true) ? (
@@ -475,11 +657,11 @@ export default function KreditPage() {
                       </Group>
                     </Group>
 
-                    {loan.description && (
+                    {loan.description ? (
                       <Text size="sm" c="dimmed">
                         {loan.description}
                       </Text>
-                    )}
+                    ) : null}
 
                     {expandedLoans[loan.id] ?? true ? (
                       <>
@@ -508,8 +690,8 @@ export default function KreditPage() {
                             </Tabs.Tab>
                           </Tabs.List>
 
-                          <Tabs.Panel value="overview" pt="md">
-                            <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="lg">
+                        <Tabs.Panel value="overview" pt="md">
+                            <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing={isMobile ? 'md' : 'lg'}>
                               <Card withBorder padding="md">
                                 <Stack gap={4}>
                                   <Text size="sm" c="dimmed">
@@ -570,7 +752,6 @@ export default function KreditPage() {
                                 </Stack>
                               </Card>
                             </SimpleGrid>
-
                             <Divider my="lg" />
 
                             <Group align="flex-start" wrap="wrap" gap="md">
@@ -618,7 +799,7 @@ export default function KreditPage() {
                           </Tabs.Panel>
 
                           <Tabs.Panel value="schedule" pt="md">
-                            <ScrollArea style={{ maxHeight: 360 }}>
+                            <ScrollArea style={{ maxHeight: isLandscape ? 240 : 360 }}>
                               <Table highlightOnHover withColumnBorders striped>
                                 <Table.Thead>
                                   <Table.Tr>
@@ -666,8 +847,7 @@ export default function KreditPage() {
                                     <div>
                                       <Text fw={600}>Noch keine Teilzahlungen</Text>
                                       <Text size="sm" c="dimmed">
-                                        Erfasse individuelle Zahlungen, um den Verlauf deines Kredits zu
-                                        dokumentieren.
+                                        Erfasse individuelle Zahlungen, um den Verlauf deines Kredits zu dokumentieren.
                                       </Text>
                                     </div>
                                   </Group>
@@ -688,11 +868,11 @@ export default function KreditPage() {
                                           <Text size="sm" c="dimmed">
                                             am {dayjs(repayment.date).format('DD.MM.YYYY')}
                                           </Text>
-                                          {repayment.note && (
+                                          {repayment.note ? (
                                             <Text size="sm" c="dimmed">
                                               Notiz: {repayment.note}
                                             </Text>
-                                          )}
+                                          ) : null}
                                         </Stack>
                                         <ActionIcon
                                           variant="subtle"
@@ -714,17 +894,22 @@ export default function KreditPage() {
                     ) : null}
                   </Stack>
                 </Card>
-              )
+              ),
             )}
           </Stack>
         )}
       </Stack>
-
       <Modal
         opened={loanModalOpen}
-        onClose={() => setLoanModalOpen(false)}
-        title="Neuen Kredit anlegen"
+        onClose={() => {
+          setLoanModalOpen(false);
+          setFormErrors({});
+          setEditingLoanId(null);
+          setLoanForm({ ...initialLoanForm, startDate: new Date() });
+        }}
+        title={editingLoanId ? 'Kredit bearbeiten' : 'Neuen Kredit anlegen'}
         size="lg"
+        fullScreen={isMobile}
         radius="md"
         centered
       >
@@ -846,7 +1031,9 @@ export default function KreditPage() {
             }}
           />
 
-          <Button onClick={handleCreateLoan}>Kredit speichern</Button>
+          <Button onClick={handleCreateLoan}>
+            {editingLoanId ? 'Änderungen speichern' : 'Kredit speichern'}
+          </Button>
         </Stack>
       </Modal>
 
@@ -854,6 +1041,7 @@ export default function KreditPage() {
         opened={repaymentForm.open}
         onClose={closeRepaymentModal}
         title="Teilzahlung erfassen"
+        fullScreen={isMobile}
         radius="md"
         centered
       >

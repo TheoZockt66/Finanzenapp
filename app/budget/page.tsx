@@ -18,6 +18,7 @@ import {
   Progress,
   SegmentedControl,
   Select,
+  ScrollArea,
   SimpleGrid,
   Stack,
   Text,
@@ -34,6 +35,7 @@ import {
   IconTrash,
   IconTrendingUp,
 } from '@tabler/icons-react';
+import { useMediaQuery } from '@mantine/hooks';
 import { useBudgets } from '../../hooks/useBudgets';
 import type { FinanzenBudget } from '../../lib/types';
 
@@ -103,6 +105,8 @@ const toFormState = (budget: FinanzenBudget): BudgetFormState => ({
 
 export default function BudgetPage() {
   const { budgets, loading, error, addBudget, editBudget, removeBudget, refresh } = useBudgets();
+  const isMobile = useMediaQuery('(max-width: 768px)');
+  const isLandscape = useMediaQuery('(max-width: 960px) and (max-height: 620px)');
 
   const [modalOpened, setModalOpened] = useState(false);
   const [formState, setFormState] = useState<BudgetFormState>(INITIAL_FORM);
@@ -336,23 +340,28 @@ export default function BudgetPage() {
   };
 
   return (
-    <Container size="xl" py="lg">
-      <Stack gap="xl">
-        <Group justify="space-between" align="flex-start">
-          <div>
+    <Container size={isMobile ? '100%' : 'xl'} py="lg" px={isMobile ? 'sm' : undefined}>
+      <Stack gap={isMobile ? 'lg' : 'xl'}>
+        <Group
+          justify="space-between"
+          align={isMobile ? 'stretch' : 'flex-start'}
+          wrap={isMobile ? 'wrap' : 'nowrap'}
+          gap="md"
+        >
+          <div style={{ flex: isMobile ? '1 1 100%' : undefined }}>
             <Title order={2}>Budgets</Title>
             <Text c="dimmed">
               Plane deine Ausgaben, beobachte kritische Bereiche und halte deine Ziele im Auge.
             </Text>
           </div>
-          <Button leftSection={<IconPlus size={16} />} onClick={openCreateModal}>
+          <Button leftSection={<IconPlus size={16} />} onClick={openCreateModal} fullWidth={isMobile}>
             Budget erstellen
           </Button>
         </Group>
 
         <Card withBorder padding="xl" radius="lg">
-          <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="lg">
-            <Card withBorder padding="md" radius="md">
+          <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing={isMobile ? 'md' : 'lg'}>
+            <Card withBorder padding={isMobile ? 'md' : 'lg'} radius="md">
               <Group justify="space-between">
                 <Stack gap={4}>
                   <Text size="xs" c="dimmed">
@@ -424,14 +433,18 @@ export default function BudgetPage() {
 
         <Card withBorder padding="lg" radius="lg">
           <Stack gap="md">
-            <Group justify="space-between" align="center">
-              <Group gap="sm">
-                <SegmentedControl
-                  value={filter}
-                  onChange={(value) => setFilter(value as FilterOption)}
-                  data={FILTER_OPTIONS}
-                />
-              </Group>
+            <Group
+              justify="space-between"
+              align={isMobile ? 'stretch' : 'center'}
+              gap="sm"
+              wrap="wrap"
+            >
+              <SegmentedControl
+                value={filter}
+                onChange={(value) => setFilter(value as FilterOption)}
+                data={FILTER_OPTIONS}
+                fullWidth={isMobile}
+              />
               <TextInput
                 placeholder="Suche nach Namen oder Kategorie"
                 value={search}
@@ -463,13 +476,17 @@ export default function BudgetPage() {
                 </Stack>
               </Card>
             ) : (
-              <Grid gutter="xl">
-                {filteredBudgets.map((budget) => (
-                  <Grid.Col key={budget.id} span={{ base: 12, sm: 6, lg: 4 }}>
-                    {renderBudgetCard(budget)}
-                  </Grid.Col>
-                ))}
-              </Grid>
+              <Box>
+                <ScrollArea.Autosize mah={isLandscape ? 260 : undefined}>
+                  <Grid gutter={isMobile ? 'md' : 'xl'}>
+                    {filteredBudgets.map((budget) => (
+                      <Grid.Col key={budget.id} span={{ base: 12, sm: 6, lg: 4 }}>
+                        {renderBudgetCard(budget)}
+                      </Grid.Col>
+                    ))}
+                  </Grid>
+                </ScrollArea.Autosize>
+              </Box>
             )}
           </Stack>
         </Card>
@@ -481,6 +498,7 @@ export default function BudgetPage() {
         onClose={resetForm}
         title={editingBudgetId ? 'Budget bearbeiten' : 'Neues Budget erstellen'}
         size="lg"
+        fullScreen={isMobile}
         radius="md"
         centered
       >

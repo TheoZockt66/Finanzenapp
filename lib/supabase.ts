@@ -44,7 +44,9 @@ export const FINANZEN_TABLES = {
   COST_CATEGORIES: 'finanzen_cost_categories',
   COST_ITEMS: 'finanzen_cost_items',
   INCOME_SOURCES: 'finanzen_income_sources',
-  BUDGET_RESETS: 'finanzen_budget_resets'
+  BUDGET_RESETS: 'finanzen_budget_resets',
+  CREDIT_LOANS: 'finanzen_credit_loans',
+  CREDIT_REPAYMENTS: 'finanzen_credit_repayments'
 } as const;
 
 // Views

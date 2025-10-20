@@ -110,6 +110,36 @@ export interface FinanzenCostPlansSnapshot {
   incomeSources: FinanzenIncomeSource[];
 }
 
+export interface FinanzenCreditLoan {
+  id: string;
+  user_id: string;
+  title: string;
+  role: 'borrower' | 'lender';
+  principal: number;
+  interest_rate: number;
+  term_months: number;
+  frequency: 'monthly' | 'bi-monthly' | 'quarterly' | 'yearly';
+  start_date: string;
+  description?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FinanzenCreditRepayment {
+  id: string;
+  loan_id: string;
+  user_id: string;
+  amount: number;
+  payment_date: string;
+  note?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FinanzenCreditLoanWithRepayments extends FinanzenCreditLoan {
+  repayments: FinanzenCreditRepayment[];
+}
+
 export interface FinanzenBudgetReset {
   id: string;
   budget_id: string;
@@ -167,6 +197,10 @@ export type UpdateCostPlanData = Partial<Omit<FinanzenCostPlan, 'id' | 'user_id'
 
 export type CreateIncomeSourceData = Omit<FinanzenIncomeSource, 'id' | 'created_at' | 'updated_at'>;
 export type UpdateIncomeSourceData = Partial<Omit<FinanzenIncomeSource, 'id' | 'user_id' | 'created_at'>>;
+
+export type CreateCreditLoanData = Omit<FinanzenCreditLoan, 'id' | 'user_id' | 'created_at' | 'updated_at'>;
+export type UpdateCreditLoanData = Partial<Omit<FinanzenCreditLoan, 'id' | 'user_id' | 'created_at'>>;
+export type CreateCreditRepaymentData = Omit<FinanzenCreditRepayment, 'id' | 'user_id' | 'created_at' | 'updated_at'>;
 
 // Form Types fuer UI
 export interface TransactionFormData {
