@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import { notifications } from '@mantine/notifications';
@@ -36,6 +36,7 @@ import {
   IconChevronDown,
   IconChevronUp,
   IconPigMoney,
+  IconPencil,
   IconPlus,
   IconTrash,
 } from '@tabler/icons-react';
@@ -469,7 +470,7 @@ export default function KreditPage() {
       const success = await removeLoan(loanId);
       if (success) {
         notifications.show({
-          title: 'Kredit gelöscht',
+          title: 'Kredit gelÃ¶scht',
           message: 'Der Kredit wurde entfernt.',
           color: 'green',
         });
@@ -478,7 +479,7 @@ export default function KreditPage() {
       console.error('Delete loan failed:', err);
       notifications.show({
         title: 'Fehler',
-        message: 'Kredit konnte nicht gelöscht werden.',
+        message: 'Kredit konnte nicht gelÃ¶scht werden.',
         color: 'red',
       });
     }
@@ -634,7 +635,7 @@ export default function KreditPage() {
                           variant="light"
                           color="red"
                           onClick={() => void handleDeleteLoan(loan.id)}
-                          title="Kredit löschen"
+                          title="Kredit lÃ¶schen"
                         >
                           <IconTrash size={16} />
                         </ActionIcon>
@@ -662,6 +663,13 @@ export default function KreditPage() {
                         {loan.description}
                       </Text>
                     ) : null}
+                    <Text
+                      size="sm"
+                      fw={600}
+                      c={outstandingPrincipal > 0 ? 'red' : 'teal'}
+                    >
+                      Offener Betrag: {formatCurrency(outstandingPrincipal)}
+                    </Text>
 
                     {expandedLoans[loan.id] ?? true ? (
                       <>
@@ -1032,7 +1040,7 @@ export default function KreditPage() {
           />
 
           <Button onClick={handleCreateLoan}>
-            {editingLoanId ? 'Änderungen speichern' : 'Kredit speichern'}
+            {editingLoanId ? 'Ã„nderungen speichern' : 'Kredit speichern'}
           </Button>
         </Stack>
       </Modal>
@@ -1111,3 +1119,4 @@ export default function KreditPage() {
     </Container>
   );
 }
+
